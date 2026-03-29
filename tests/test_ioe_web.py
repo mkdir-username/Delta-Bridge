@@ -186,3 +186,83 @@ class TestDemoMode:
         assert "body" in data
         server.server_close()
         ioe_web.DEMO_MODE = old
+
+
+class TestStatusEndpoint:
+    def test_status_passes_format_field(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with ioe_web.lock:
+            ioe_web.pending["fmt123"] = {
+                "id": "fmt123", "status": 200,
+                "title": "T", "body": "B", "format": "markdown",
+            }
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        resp = urlopen("http://127.0.0.1:{}/status?id=fmt123".format(port), timeout=5)
+        data = json.loads(resp.read().decode())
+        assert data["format"] == "markdown"
+        server.server_close()
+
+    def test_status_error_response(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with ioe_web.lock:
+            ioe_web.pending["err123"] = {
+                "id": "err123", "status": 500, "error": "HTTPError",
+            }
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        resp = urlopen("http://127.0.0.1:{}/status?id=err123".format(port), timeout=5)
+        data = json.loads(resp.read().decode())
+        assert data["status"] == "error"
+        assert data["error"] == "HTTPError"
+        server.server_close()
+
+    def test_status_default_format_html(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with ioe_web.lock:
+            ioe_web.pending["nofmt"] = {
+                "id": "nofmt", "status": 200,
+                "title": "T", "body": "<p>B</p>",
+            }
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        resp = urlopen("http://127.0.0.1:{}/status?id=nofmt".format(port), timeout=5)
+        data = json.loads(resp.read().decode())
+        assert data["format"] == "html"
+        server.server_close()
+
+    def test_404_for_unknown_path(self):
+        import ioe_web
+        from urllib.error import HTTPError as UrlHTTPError
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        try:
+            urlopen("http://127.0.0.1:{}/nonexistent".format(port), timeout=5)
+            assert False, "expected 404"
+        except UrlHTTPError as e:
+            assert e.code == 404
+        server.server_close()
+
+
+class TestDemoFormatField:
+    def test_demo_get_has_format(self):
+        import ioe_web
+        old = ioe_web.DEMO_MODE
+        ioe_web.DEMO_MODE = True
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        resp = urlopen("http://127.0.0.1:{}/get?url=https://example.com".format(port), timeout=5)
+        data = json.loads(resp.read().decode())
+        assert "format" in data
+        server.server_close()
+        ioe_web.DEMO_MODE = old
