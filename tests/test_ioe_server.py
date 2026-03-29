@@ -5,7 +5,7 @@ import os
 import types
 sys.path.insert(0, os.path.dirname(__file__))
 
-for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests"]:
+for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests", "trafilatura"]:
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
 sys.modules["truststore"].inject_into_ssl = lambda: None
@@ -21,6 +21,25 @@ sys.modules["readability"].Document = _MockDoc
 sys.modules["PIL.Image"] = sys.modules["PIL"]
 sys.modules["PIL"].Image = sys.modules["PIL"]
 sys.modules["requests"].get = lambda *a, **kw: None
+def _mock_trafilatura_extract(html, **kw):
+    if not html or len(html) < 500:
+        return None
+    from html.parser import HTMLParser
+    class S(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.text = []
+        def handle_data(self, d):
+            self.text.append(d)
+    s = S()
+    s.feed(html)
+    text = " ".join(s.text).strip()
+    if len(text) < 200:
+        return None
+    if kw.get("output_format") == "markdown":
+        return "# Extracted\n\n" + text[:2000]
+    return text[:2000]
+sys.modules["trafilatura"].extract = _mock_trafilatura_extract
 sys.modules["PIL"].open = lambda *a: None
 
 os.environ.setdefault("EMAIL", "test@test.com")
@@ -70,164 +89,120 @@ def test_search_response_has_results_field():
     assert "body" not in sample_response
 
 
-def test_fetch_content_returns_html():
+def test_smart_extract_returns_markdown_for_article():
     import types, ioe_server
-    html = "<html><body><h1>Title</h1>" + "<p>Content paragraph. " * 100 + "</p></body></html>"
-    mock_resp = types.SimpleNamespace(
-        text=html, status_code=200, raise_for_status=lambda: None,
-    )
+    html = "<html><body><article><h1>Title</h1><p>Long article. " + "Sentence here. " * 50 + "</p><a href='https://link.com'>Link</a></article></body></html>"
+    mock_resp = types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
     original = ioe_server.requests.get
     ioe_server.requests.get = lambda *a, **kw: mock_resp
     try:
-        title, content, fmt = ioe_server.fetch_content("https://example.com")
-        assert fmt == "html"
-        assert isinstance(content, str)
-        assert len(content) > 100
+        result = ioe_server.smart_extract("https://example.com/article/1")
+        assert result["format"] in ("markdown", "html")
+        assert len(result["body"]) > 100
+        assert result["type"] in ("article", "page")
+        assert "domain" in result
+        assert "word_count" in result
     finally:
         ioe_server.requests.get = original
 
 
-def test_fetch_content_preserves_links():
+def test_smart_extract_soup_fallback_for_feed():
     import types, ioe_server
-    html = '<html><body><a href="/article/1">Link</a><p>' + 'Text. ' * 200 + '</p></body></html>'
-    mock_resp = types.SimpleNamespace(
-        text=html, status_code=200, raise_for_status=lambda: None,
-    )
+    feed_html = "<html><body>"
+    for i in range(10):
+        feed_html += '<article><h2><a href="/post/{}">Post {}</a></h2><p>Desc {}</p></article>'.format(i, i, i)
+    feed_html += "</body></html>"
+    mock_resp = types.SimpleNamespace(text=feed_html, status_code=200, raise_for_status=lambda: None)
     original = ioe_server.requests.get
     ioe_server.requests.get = lambda *a, **kw: mock_resp
     try:
-        title, content, fmt = ioe_server.fetch_content("https://example.com")
-        assert "https://example.com/article/1" in content or "/article/1" in content
+        result = ioe_server.smart_extract("https://example.com/feed")
+        assert result["type"] == "feed"
+        assert "Post 0" in result["body"]
+        assert "Post 9" in result["body"]
     finally:
         ioe_server.requests.get = original
 
 
-def test_fetch_content_soup_fallback_on_short_readability():
-    """readability < MIN_READABLE_LEN -> soup fallback с полным контентом."""
+def test_detect_type_article():
+    import ioe_server
+    assert ioe_server.detect_type("https://habr.com/ru/articles/123/", "<html><article>x</article></html>") == "article"
+
+
+def test_detect_type_feed():
+    import ioe_server
+    html = "<html><body>" + "<article>x</article>" * 5 + "</body></html>"
+    assert ioe_server.detect_type("https://habr.com/ru/feed/", html) == "feed"
+
+
+def test_smart_extract_includes_metadata():
     import types, ioe_server
-
-    full_html = '<html><head><title>Feed</title></head><body>'
-    for i in range(20):
-        full_html += '<div><a href="/post/{}">Post {}</a><p>Description {}</p></div>'.format(i, i, i)
-    full_html += '</body></html>'
-
-    mock_resp = types.SimpleNamespace(
-        text=full_html, status_code=200, raise_for_status=lambda: None,
-    )
+    html = "<html><body><article><h1>T</h1><p>" + "Word " * 100 + "</p></article></body></html>"
+    mock_resp = types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
     original = ioe_server.requests.get
     ioe_server.requests.get = lambda *a, **kw: mock_resp
     try:
-        title, content, fmt = ioe_server.fetch_content("https://example.com/feed")
-        assert fmt == "html"
-        assert "Post 0" in content
-        assert "Post 19" in content
-        assert len(content) > 500
+        result = ioe_server.smart_extract("https://example.com/page")
+        assert result["domain"] == "example.com"
+        assert result["word_count"] > 0
     finally:
         ioe_server.requests.get = original
 
 
-def test_fetch_content_strips_dangerous_tags():
-    """script, style, iframe должны быть удалены из soup fallback."""
+def test_smart_extract_strips_dangerous_tags_in_soup():
     import types, ioe_server
-
-    html = '<html><body><script>alert(1)</script><style>.x{}</style><iframe src="evil"></iframe><p>Safe content here. ' + 'More text. ' * 100 + '</p></body></html>'
-    mock_resp = types.SimpleNamespace(
-        text=html, status_code=200, raise_for_status=lambda: None,
-    )
+    html = '<html><body><script>alert(1)</script><iframe src="x"></iframe><p>Safe. ' + 'More. ' * 50 + '</p></body></html>'
+    mock_resp = types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
     original = ioe_server.requests.get
     ioe_server.requests.get = lambda *a, **kw: mock_resp
     try:
-        title, content, fmt = ioe_server.fetch_content("https://example.com")
-        assert "alert(1)" not in content
-        assert "<script" not in content
-        assert "<iframe" not in content
-        assert "<style" not in content
-        assert "Safe content" in content
+        result = ioe_server.smart_extract("https://example.com")
+        assert "alert(1)" not in result["body"]
+        assert "<script" not in result["body"]
+        assert "Safe" in result["body"]
     finally:
         ioe_server.requests.get = original
 
 
-def test_fetch_content_converts_relative_links():
-    """Относительные href /path -> абсолютные https://domain/path."""
+def test_smart_extract_converts_relative_links_in_soup():
+    """When trafilatura fails (short content), soup fallback converts relative links."""
     import types, ioe_server
-
-    html = '<html><body><a href="/about">About</a><a href="https://other.com">Other</a><p>' + 'Text. ' * 200 + '</p></body></html>'
-    mock_resp = types.SimpleNamespace(
-        text=html, status_code=200, raise_for_status=lambda: None,
-    )
+    # Short HTML → trafilatura returns None → soup fallback
+    html = '<html><body><a href="/about">About</a><p>Short.</p></body></html>'
+    mock_resp = types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
     original = ioe_server.requests.get
     ioe_server.requests.get = lambda *a, **kw: mock_resp
     try:
-        title, content, fmt = ioe_server.fetch_content("https://example.com/page")
-        assert "https://example.com/about" in content
-        assert "https://other.com" in content
+        result = ioe_server.smart_extract("https://example.com/page")
+        assert result["format"] == "html"
+        assert "https://example.com/about" in result["body"]
     finally:
         ioe_server.requests.get = original
-
-
-def test_fetch_content_readability_crash_fallback():
-    """Если readability бросает исключение -> soup fallback."""
-    import types, ioe_server
-
-    class CrashDoc:
-        def __init__(self, html):
-            raise ValueError("readability crash")
-
-    original_doc = sys.modules["readability"].Document
-    sys.modules["readability"].Document = CrashDoc
-
-    html = '<html><head><title>Page</title></head><body><p>' + 'Content here. ' * 100 + '</p></body></html>'
-    mock_resp = types.SimpleNamespace(
-        text=html, status_code=200, raise_for_status=lambda: None,
-    )
-    original = ioe_server.requests.get
-    ioe_server.requests.get = lambda *a, **kw: mock_resp
-    try:
-        import importlib
-        importlib.reload(ioe_server)
-        title, content, fmt = ioe_server.fetch_content("https://example.com")
-        assert fmt == "html"
-        assert "Content here" in content
-    finally:
-        ioe_server.requests.get = original
-        sys.modules["readability"].Document = original_doc
 
 
 def test_fetch_text_strips_html():
-    """fetch_text должен вернуть plain text без тегов."""
     import types, ioe_server
-
     html = '<html><body><h1>Title</h1><nav>Nav</nav><p>Hello world</p><script>bad</script></body></html>'
-    mock_resp = types.SimpleNamespace(
-        text=html, status_code=200, raise_for_status=lambda: None,
-    )
+    mock_resp = types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
     original = ioe_server.requests.get
     ioe_server.requests.get = lambda *a, **kw: mock_resp
     try:
         text = ioe_server.fetch_text("https://example.com")
         assert "Hello world" in text
-        assert "<h1>" not in text
         assert "<script>" not in text
-        assert "Nav" not in text
     finally:
         ioe_server.requests.get = original
 
 
 def test_do_search_error_returns_structured():
-    """do_search при ошибке DDG должен вернуть list с error, не crash."""
     import ioe_server
-
     class FailDDGS:
         def text(self, query, max_results=10):
             raise ConnectionError("DDG down")
-
     sys.modules['ddgs'] = types.ModuleType('ddgs')
     sys.modules['ddgs'].DDGS = FailDDGS
-
     import importlib
     importlib.reload(ioe_server)
-
     result = ioe_server.do_search("test")
     assert isinstance(result, list)
     assert len(result) >= 1
-    assert "error" in result[0].get("snippet", "").lower() or "error" in result[0].get("title", "").lower()

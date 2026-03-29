@@ -638,6 +638,25 @@ footer .channel { color: var(--text-dim); }
 <script>
 var busy = false, pollTimer = null, loadTimer = null, t0 = 0;
 var lastResults = null;
+var lastMarkdown = '';
+
+if (typeof marked !== 'undefined') {
+  var ioeRenderer = new marked.Renderer();
+  ioeRenderer.link = function(token) {
+    var href = token.href || '';
+    var text = token.text || '';
+    if (href.indexOf('http') === 0) {
+      return '<a data-ioe-url="' + escHtml(href) + '" href="javascript:void(0)" title="' + escHtml(href) + '" style="color:var(--link);cursor:pointer">' + text + '</a>';
+    }
+    return '<a href="' + escHtml(href) + '">' + text + '</a>';
+  };
+  ioeRenderer.image = function(token) {
+    var href = token.href || '';
+    var text = token.text || '';
+    return '<img loading="lazy" src="' + href + '" alt="' + escHtml(text) + '" style="max-width:100%;border-radius:6px;margin:12px 0">';
+  };
+  marked.setOptions({ renderer: ioeRenderer, breaks: true, gfm: true });
+}
 
 function $(id) { return document.getElementById(id); }
 var urlInput = $('url');
@@ -780,30 +799,40 @@ function showReader(url, data) {
     : '<button class="back-btn" onclick="history.back()">\u2190 \u043d\u0430\u0437\u0430\u0434</button>';
 
   var bodyContent;
+  lastMarkdown = '';
   if (fmt === 'markdown' && typeof marked !== 'undefined') {
     bodyContent = marked.parse(body);
+    lastMarkdown = body;
   } else if (body.indexOf('<') > -1 && body.indexOf('>') > -1) {
     bodyContent = body;
   } else {
     bodyContent = formatRawText(body);
   }
 
+  var wc = data.word_count || 0;
+  var readTime = wc > 0 ? Math.ceil(wc / 200) : 0;
+  var metaLine = escHtml(domain) + ' \u00b7 ' + elapsed + 's';
+  if (wc > 0) metaLine += ' \u00b7 ' + wc + ' \u0441\u043b\u043e\u0432 \u00b7 ~' + readTime + ' \u043c\u0438\u043d';
+  var copyBtn = lastMarkdown ? ' <button onclick="copyMd()" style="background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-ui)">\u{1f4cb} Copy MD</button>' : '';
+
   content.innerHTML = '<div class="reader">' + backHtml +
-    '<div class="reader-meta"><div class="source">' + escHtml(domain) + ' \u00b7 ' + elapsed + 's</div>' +
+    '<div class="reader-meta"><div class="source">' + metaLine + copyBtn + '</div>' +
     (title ? '<h1>' + escHtml(title) + '</h1>' : '') +
     '</div><div class="reader-body" id="readerBody"></div></div>';
 
   $('readerBody').innerHTML = bodyContent;
 
-  $('readerBody').querySelectorAll('a[href]').forEach(function(a) {
-    var href = a.getAttribute('href');
-    if (href && (href.indexOf('http://') === 0 || href.indexOf('https://') === 0)) {
-      a.setAttribute('data-ioe-url', href);
-      a.setAttribute('href', 'javascript:void(0)');
-      a.style.color = 'var(--link)';
-      a.style.cursor = 'pointer';
-    }
-  });
+  if (fmt !== 'markdown') {
+    $('readerBody').querySelectorAll('a[href]').forEach(function(a) {
+      var href = a.getAttribute('href');
+      if (href && (href.indexOf('http://') === 0 || href.indexOf('https://') === 0)) {
+        a.setAttribute('data-ioe-url', href);
+        a.setAttribute('href', 'javascript:void(0)');
+        a.style.color = 'var(--link)';
+        a.style.cursor = 'pointer';
+      }
+    });
+  }
 
   urlInput.value = url;
   window.scrollTo(0, 0);
@@ -870,6 +899,14 @@ content.addEventListener('click', function(e) {
     openPage(link.getAttribute('data-ioe-url'));
   }
 });
+
+function copyMd() {
+  if (lastMarkdown && navigator.clipboard) {
+    navigator.clipboard.writeText(lastMarkdown).then(function() {
+      setStatus('Copied!', 'ok');
+    });
+  }
+}
 
 urlInput.focus();
 </script>

@@ -78,6 +78,17 @@ class TestV4Design:
     def test_has_markdown_render_logic(self):
         assert 'marked.parse' in get_html()
 
+    def test_has_custom_renderer(self):
+        html = get_html()
+        assert 'new marked.Renderer' in html or 'ioeRenderer' in html
+
+    def test_has_copy_markdown(self):
+        html = get_html()
+        assert 'copyMd' in html or 'clipboard' in html
+
+    def test_has_word_count_display(self):
+        assert 'word_count' in get_html()
+
     def test_cmd_click_support(self):
         assert 'metaKey' in get_html()
         assert 'ctrlKey' in get_html()

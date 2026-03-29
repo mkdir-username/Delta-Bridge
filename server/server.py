@@ -128,40 +128,83 @@ def fetch_text(url):
     return soup.get_text(separator="\n", strip=True)
 
 
-MIN_READABLE_LEN = 2000
+import trafilatura
+import re as _re
+
+MIN_EXTRACT_LEN = 200
 
 
-def fetch_content(url):
-    """Fetch URL content: readability first, fallback to soup if too short."""
+def detect_type(url, html):
+    if _re.search(r'/article|/post|/blog|/news/\d', url):
+        return 'article'
+    if _re.search(r'/feed|/hub|/flows|/all$|/top$', url):
+        return 'feed'
+    if _re.search(r'/search|[?&]q=', url):
+        return 'search'
+    soup = BeautifulSoup(html, 'html.parser')
+    articles = soup.find_all('article')
+    if len(articles) > 3:
+        return 'feed'
+    if len(articles) == 1:
+        return 'article'
+    return 'page'
+
+
+def smart_extract(url):
     validate_url(url)
     resp = requests.get(url, timeout=FETCH_TIMEOUT, headers={"User-Agent": UA})
     resp.raise_for_status()
     raw_html = resp.text
+    parsed_url = urlparse(url)
+    domain = parsed_url.hostname or ""
+    page_type = detect_type(url, raw_html)
 
-    try:
-        doc = Document(raw_html)
-        title = doc.title()
-        content = doc.summary()
-        content = inline_images(content, url)
-        if len(content) > MIN_READABLE_LEN:
-            return title, content, "html"
-        log.info("readability too short (%d chars), falling back to soup", len(content))
-    except Exception as e:
+    # Tier 1: trafilatura markdown
+    md = trafilatura.extract(raw_html, output_format='markdown',
+                            include_links=True, include_images=True,
+                            include_tables=True, url=url)
+    if md and len(md) > MIN_EXTRACT_LEN:
         title = ""
-        log.warning("readability failed: %s", e)
+        for line in md.split("\n"):
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+        return {
+            "format": "markdown", "type": page_type,
+            "title": title, "body": md, "domain": domain,
+            "word_count": len(md.split()),
+        }
 
-    soup = BeautifulSoup(raw_html, "html.parser")
-    title = title or (soup.title.string if soup.title else "")
+    # Tier 2: trafilatura with favor_recall
+    md = trafilatura.extract(raw_html, output_format='markdown',
+                            include_links=True, include_images=True,
+                            favor_recall=True, url=url)
+    if md and len(md) > MIN_EXTRACT_LEN:
+        title = md.split("\n")[0].lstrip("# ").strip()[:100]
+        return {
+            "format": "markdown", "type": page_type,
+            "title": title, "body": md, "domain": domain,
+            "word_count": len(md.split()),
+        }
+
+    log.info("trafilatura insufficient (%d chars), soup fallback", len(md or ""))
+
+    # Tier 3: soup cleanup
+    soup = BeautifulSoup(raw_html, 'html.parser')
+    title = soup.title.string if soup.title else ""
     for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
         tag.decompose()
     for a in soup.find_all("a", href=True):
         href = a["href"]
         if href.startswith("/"):
-            from urllib.parse import urlparse as _up
-            base = _up(url)
-            a["href"] = "{}://{}{}".format(base.scheme, base.netloc, href)
+            a["href"] = "{}://{}{}".format(parsed_url.scheme, parsed_url.netloc, href)
     body = soup.find("body") or soup
-    return title or "", str(body), "html"
+    html_content = str(body)
+    return {
+        "format": "html", "type": page_type,
+        "title": title or "", "body": html_content, "domain": domain,
+        "word_count": len(BeautifulSoup(html_content, 'html.parser').get_text().split()),
+    }
 
 
 def fetch_readable(url):
@@ -277,12 +320,15 @@ def process_message(client, uid, raw):
             })
         else:
             url = request.get("url", "")
-            title, content, fmt = fetch_content(url)
-            if len(content) > MAX_BODY:
-                content = content[:MAX_BODY]
+            result = smart_extract(url)
+            body = result["body"]
+            if len(body) > MAX_BODY:
+                body = body[:MAX_BODY]
             append_response(client, {
-                "id": req_id, "status": 200, "title": title,
-                "body": content, "format": fmt,
+                "id": req_id, "status": 200,
+                "title": result["title"], "body": body,
+                "format": result["format"], "type": result["type"],
+                "domain": result["domain"], "word_count": result["word_count"],
             })
         log.info("Done uid=%s", uid)
     except Exception as e:
