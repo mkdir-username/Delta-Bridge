@@ -2,6 +2,17 @@
 
 Internet-over-Email tunnel. Browse the web through IMAP email transport — designed for networks with whitelist-only access where only email protocols are allowed.
 
+## Quick Start
+
+```bash
+git clone https://github.com/mkdir-username/Delta-Bridge.git
+cd Delta-Bridge
+./setup.sh   # install deps, create .env, add 'ioe' alias
+./start.sh   # open http://localhost:8080
+```
+
+After setup, just type `ioe` anywhere to launch.
+
 ## Architecture
 
 ```
