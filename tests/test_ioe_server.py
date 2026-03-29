@@ -70,38 +70,33 @@ def test_search_response_has_results_field():
     assert "body" not in sample_response
 
 
-def test_fetch_markdown_returns_markdown():
+def test_fetch_content_returns_html():
     import types, ioe_server
+    html = "<html><body><h1>Title</h1>" + "<p>Content paragraph. " * 100 + "</p></body></html>"
     mock_resp = types.SimpleNamespace(
-        text="# Hello World\n\nSome content here. More text to exceed fifty chars minimum length check.",
-        status_code=200, raise_for_status=lambda: None,
+        text=html, status_code=200, raise_for_status=lambda: None,
     )
     original = ioe_server.requests.get
     ioe_server.requests.get = lambda *a, **kw: mock_resp
     try:
-        title, content, fmt = ioe_server.fetch_markdown("https://example.com")
-        assert fmt == "markdown"
-        assert "Hello World" in content
+        title, content, fmt = ioe_server.fetch_content("https://example.com")
+        assert fmt == "html"
+        assert isinstance(content, str)
+        assert len(content) > 100
     finally:
         ioe_server.requests.get = original
 
 
-def test_fetch_markdown_fallback_on_error():
+def test_fetch_content_preserves_links():
     import types, ioe_server
-    call_log = []
-    def mock_get(url, **kw):
-        call_log.append(url)
-        if "md.dhr.wtf" in url:
-            raise Exception("down")
-        return types.SimpleNamespace(
-            text="<html><body><h1>T</h1><p>C</p></body></html>",
-            status_code=200, raise_for_status=lambda: None,
-        )
+    html = '<html><body><a href="/article/1">Link</a><p>' + 'Text. ' * 200 + '</p></body></html>'
+    mock_resp = types.SimpleNamespace(
+        text=html, status_code=200, raise_for_status=lambda: None,
+    )
     original = ioe_server.requests.get
-    ioe_server.requests.get = mock_get
+    ioe_server.requests.get = lambda *a, **kw: mock_resp
     try:
-        title, content, fmt = ioe_server.fetch_markdown("https://example.com")
-        assert fmt == "html"
-        assert any("md.dhr.wtf" in u for u in call_log)
+        title, content, fmt = ioe_server.fetch_content("https://example.com")
+        assert "https://example.com/article/1" in content or "/article/1" in content
     finally:
         ioe_server.requests.get = original

@@ -128,27 +128,40 @@ def fetch_text(url):
     return soup.get_text(separator="\n", strip=True)
 
 
-MARKDOWN_API = "https://md.dhr.wtf/"
-MARKDOWN_TIMEOUT = 25
+MIN_READABLE_LEN = 500
 
 
-def fetch_markdown(url):
+def fetch_content(url):
+    """Fetch URL content: readability first, fallback to soup if too short."""
     validate_url(url)
+    resp = requests.get(url, timeout=FETCH_TIMEOUT, headers={"User-Agent": UA})
+    resp.raise_for_status()
+    raw_html = resp.text
+
     try:
-        resp = requests.get(MARKDOWN_API + url, timeout=MARKDOWN_TIMEOUT, headers={"User-Agent": UA})
-        resp.raise_for_status()
-        md = resp.text.strip()
-        if md and len(md) > 50:
-            title = ""
-            for line in md.split("\n"):
-                if line.startswith("# "):
-                    title = line[2:].strip()
-                    break
-            return title, md, "markdown"
+        doc = Document(raw_html)
+        title = doc.title()
+        content = doc.summary()
+        content = inline_images(content, url)
+        if len(content) > MIN_READABLE_LEN:
+            return title, content, "html"
+        log.info("readability too short (%d chars), falling back to soup", len(content))
     except Exception as e:
-        log.warning("markdown.new failed for %s: %s", url, e)
-    title, html = fetch_readable(url)
-    return title, html, "html"
+        title = ""
+        log.warning("readability failed: %s", e)
+
+    soup = BeautifulSoup(raw_html, "html.parser")
+    title = title or (soup.title.string if soup.title else "")
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
+        tag.decompose()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if href.startswith("/"):
+            from urllib.parse import urlparse as _up
+            base = _up(url)
+            a["href"] = "{}://{}{}".format(base.scheme, base.netloc, href)
+    body = soup.find("body") or soup
+    return title or "", str(body), "html"
 
 
 def fetch_readable(url):
@@ -264,7 +277,7 @@ def process_message(client, uid, raw):
             })
         else:
             url = request.get("url", "")
-            title, content, fmt = fetch_markdown(url)
+            title, content, fmt = fetch_content(url)
             if len(content) > MAX_BODY:
                 content = content[:MAX_BODY]
             append_response(client, {
