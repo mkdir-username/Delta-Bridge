@@ -159,6 +159,25 @@ def smart_extract(url):
     domain = parsed_url.hostname or ""
     page_type = detect_type(url, raw_html)
 
+    # Feed pages: skip trafilatura (extracts only 1 article), use soup directly
+    if page_type == 'feed':
+        log.info("feed page detected, using soup directly")
+        soup = BeautifulSoup(raw_html, 'html.parser')
+        title = soup.title.string if soup.title else ""
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
+            tag.decompose()
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.startswith("/"):
+                a["href"] = "{}://{}{}".format(parsed_url.scheme, parsed_url.netloc, href)
+        body = soup.find("body") or soup
+        html_content = str(body)
+        return {
+            "format": "html", "type": page_type,
+            "title": title or "", "body": html_content, "domain": domain,
+            "word_count": len(BeautifulSoup(html_content, 'html.parser').get_text().split()),
+        }
+
     # Tier 1: trafilatura markdown
     md = trafilatura.extract(raw_html, output_format='markdown',
                             include_links=True, include_images=True,
