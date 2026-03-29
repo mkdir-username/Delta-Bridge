@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+.ioe.env
+*.bak
+*.log
+.pytest_cache/
