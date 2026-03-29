@@ -799,7 +799,9 @@ function showReader(url, data) {
     var href = a.getAttribute('href');
     if (href && (href.indexOf('http://') === 0 || href.indexOf('https://') === 0)) {
       a.setAttribute('data-ioe-url', href);
-      a.removeAttribute('onclick');
+      a.setAttribute('href', 'javascript:void(0)');
+      a.style.color = 'var(--link)';
+      a.style.cursor = 'pointer';
     }
   });
 

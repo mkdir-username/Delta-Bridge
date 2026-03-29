@@ -128,7 +128,7 @@ def fetch_text(url):
     return soup.get_text(separator="\n", strip=True)
 
 
-MIN_READABLE_LEN = 500
+MIN_READABLE_LEN = 2000
 
 
 def fetch_content(url):
@@ -301,6 +301,7 @@ def main():
                 client.select_folder(QUEUE_FOLDER)
                 log.info("Connected, monitoring folder '%s'", QUEUE_FOLDER)
                 while True:
+                    client.noop()
                     messages = client.search(["ALL"])
                     for uid in messages:
                         data = client.fetch([uid], ["RFC822"])
@@ -310,9 +311,7 @@ def main():
                             client.delete_messages([uid])
                             client.expunge()
                             log.info("Deleted uid=%s from queue", uid)
-                    client.idle()
-                    client.idle_check(timeout=5)
-                    client.idle_done()
+                    time.sleep(3)
         except Exception as e:
             log.error("Connection error: %s, reconnecting in 5s", e)
             time.sleep(5)
