@@ -73,7 +73,7 @@ class TestV4Design:
     def test_has_marked_js(self):
         html = get_html()
         assert 'marked' in html
-        assert 'marked.min.js' in html
+        assert 'Lexer' in html  # inlined marked.js contains Lexer class
 
     def test_has_markdown_render_logic(self):
         assert 'marked.parse' in get_html()
@@ -81,6 +81,15 @@ class TestV4Design:
     def test_has_custom_renderer(self):
         html = get_html()
         assert 'new marked.Renderer' in html or 'ioeRenderer' in html
+
+    def test_marked_js_is_inlined(self):
+        html = get_html()
+        assert 'cdn.jsdelivr.net' not in html
+        assert 'Lexer' in html or 'marked' in html
+
+    def test_url_detection_requires_latin_tld(self):
+        html = get_html()
+        assert '[a-zA-Z]' in html
 
     def test_has_copy_markdown(self):
         html = get_html()

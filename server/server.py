@@ -150,7 +150,24 @@ def detect_type(url, html):
     return 'page'
 
 
+_page_cache = {}
+PAGE_CACHE_MAX = 100
+
+
 def smart_extract(url):
+    cache_key = url.split('?')[0]
+    if cache_key in _page_cache:
+        log.info("cache HIT: %s", url)
+        return _page_cache[cache_key]
+    result = _smart_extract_impl(url)
+    if len(_page_cache) >= PAGE_CACHE_MAX:
+        oldest = next(iter(_page_cache))
+        del _page_cache[oldest]
+    _page_cache[cache_key] = result
+    return result
+
+
+def _smart_extract_impl(url):
     validate_url(url)
     resp = requests.get(url, timeout=FETCH_TIMEOUT, headers={"User-Agent": UA})
     resp.raise_for_status()
@@ -164,7 +181,8 @@ def smart_extract(url):
         log.info("feed page detected, using soup directly")
         soup = BeautifulSoup(raw_html, 'html.parser')
         title = soup.title.string if soup.title else ""
-        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe",
+                         "form", "input", "select", "fieldset", "legend", "label", "button"]):
             tag.decompose()
         for a in soup.find_all("a", href=True):
             href = a["href"]
@@ -211,7 +229,8 @@ def smart_extract(url):
     # Tier 3: soup cleanup
     soup = BeautifulSoup(raw_html, 'html.parser')
     title = soup.title.string if soup.title else ""
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe",
+                     "form", "input", "select", "fieldset", "legend", "label", "button"]):
         tag.decompose()
     for a in soup.find_all("a", href=True):
         href = a["href"]

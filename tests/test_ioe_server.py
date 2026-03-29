@@ -167,17 +167,18 @@ def test_smart_extract_strips_dangerous_tags_in_soup():
 def test_smart_extract_converts_relative_links_in_soup():
     """When trafilatura fails (short content), soup fallback converts relative links."""
     import types, ioe_server
-    # Short HTML → trafilatura returns None → soup fallback
     html = '<html><body><a href="/about">About</a><p>Short.</p></body></html>'
     mock_resp = types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
     original = ioe_server.requests.get
     ioe_server.requests.get = lambda *a, **kw: mock_resp
+    ioe_server._page_cache.clear()
     try:
-        result = ioe_server.smart_extract("https://example.com/page")
+        result = ioe_server.smart_extract("https://example.com/page-rellinks")
         assert result["format"] == "html"
         assert "https://example.com/about" in result["body"]
     finally:
         ioe_server.requests.get = original
+        ioe_server._page_cache.clear()
 
 
 def test_fetch_text_strips_html():
@@ -192,6 +193,44 @@ def test_fetch_text_strips_html():
         assert "<script>" not in text
     finally:
         ioe_server.requests.get = original
+
+
+def test_smart_extract_uses_cache():
+    import types, ioe_server
+    call_count = [0]
+    def counting_get(*a, **kw):
+        call_count[0] += 1
+        html = "<html><body><article><h1>T</h1><p>" + "Word " * 100 + "</p></article></body></html>"
+        return types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
+    original = ioe_server.requests.get
+    ioe_server.requests.get = counting_get
+    ioe_server._page_cache.clear()
+    try:
+        r1 = ioe_server.smart_extract("https://example.com/cached-test")
+        r2 = ioe_server.smart_extract("https://example.com/cached-test")
+        assert r1["body"] == r2["body"]
+        assert call_count[0] == 1
+    finally:
+        ioe_server.requests.get = original
+        ioe_server._page_cache.clear()
+
+
+def test_feed_soup_strips_forms():
+    import types, ioe_server
+    feed_html = '<html><body><form><input type="checkbox"><fieldset><legend>F</legend></fieldset></form>' + \
+        '<article><a href="/p/1">P1</a></article>' * 4 + '</body></html>'
+    mock_resp = types.SimpleNamespace(text=feed_html, status_code=200, raise_for_status=lambda: None)
+    original = ioe_server.requests.get
+    ioe_server.requests.get = lambda *a, **kw: mock_resp
+    ioe_server._page_cache.clear()
+    try:
+        result = ioe_server.smart_extract("https://example.com/feed")
+        assert "<form" not in result["body"]
+        assert "<input" not in result["body"]
+        assert "P1" in result["body"]
+    finally:
+        ioe_server.requests.get = original
+        ioe_server._page_cache.clear()
 
 
 def test_do_search_error_returns_structured():
