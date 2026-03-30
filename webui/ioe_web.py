@@ -73,6 +73,13 @@ pending = {}
 lock = threading.Lock()
 notification_queues = {}
 
+import hashlib as _hashlib
+_device_seed = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
+    os.environ.get("USER", ""), __import__("socket").gethostname())
+DEVICE_ID = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
+
+seen_notification_uids = set()
+
 HTML_PAGE = (
     r"""<!DOCTYPE html>
 <html lang="ru">
@@ -119,6 +126,7 @@ def main():
         print("WARNING: WHITELIST EMPTY — no users can log in!")
         print("Add phones to users.json and restart.")
         print("=" * 60 + "\n")
+    log.info("Device ID: %s", DEVICE_ID)
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(("0.0.0.0", port), Handler)
     mode = " (demo)" if DEMO_MODE else ""
