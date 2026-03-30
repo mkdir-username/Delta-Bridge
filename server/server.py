@@ -102,7 +102,9 @@ BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254", "metada
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 RATE_LIMIT = 10
 RATE_WINDOW = 60
-_rate_timestamps = []
+_rate_timestamps = {}
+_processed_uids = set()
+_MAX_PROCESSED = 1000
 
 _sessions = {}
 SESSION_TTL = 3600
@@ -132,12 +134,15 @@ def validate_url(url):
             pass
 
 
-def check_rate_limit():
+def check_rate_limit(user_id="default"):
     now = time.time()
-    _rate_timestamps[:] = [t for t in _rate_timestamps if now - t < RATE_WINDOW]
-    if len(_rate_timestamps) >= RATE_LIMIT:
+    if user_id not in _rate_timestamps:
+        _rate_timestamps[user_id] = []
+    ts = _rate_timestamps[user_id]
+    ts[:] = [t for t in ts if now - t < RATE_WINDOW]
+    if len(ts) >= RATE_LIMIT:
         raise ValueError("Rate limit exceeded")
-    _rate_timestamps.append(now)
+    ts.append(now)
 
 
 def make_envelope(encrypted_bytes):
@@ -383,7 +388,7 @@ def handle_http_proxy(request):
 
     try:
         validate_url(url)
-        check_rate_limit()
+        check_rate_limit(request.get("user_id", "default"))
     except ValueError as e:
         return {"type": "http_response", "status_code": 403, "error": str(e)}
 
@@ -467,6 +472,10 @@ def dispatch_request(request):
 
 
 def process_message(client, uid, raw):
+    if uid in _processed_uids:
+        log.info("uid=%s already processed, skipping", uid)
+        return True
+
     payload = extract_attachment(raw)
     if payload is None:
         log.warning("uid=%s: no attachment, skipping", uid)
@@ -485,6 +494,9 @@ def process_message(client, uid, raw):
         req_id = request.get("id", "")
         append_response(client, {"id": req_id, **dispatch_result})
         log.info("Done uid=%s (type=%s)", uid, request.get("type"))
+        _processed_uids.add(uid)
+        if len(_processed_uids) > _MAX_PROCESSED:
+            _processed_uids.clear()
         return True
 
     cmd = request.get("cmd", "GET").upper()
@@ -492,7 +504,7 @@ def process_message(client, uid, raw):
     log.info("Processing uid=%s", uid)
 
     try:
-        check_rate_limit()
+        check_rate_limit(request.get("user_id", "default"))
         if cmd == "SEARCH":
             query = request.get("query", "")
             results = do_search(query)
@@ -533,6 +545,9 @@ def process_message(client, uid, raw):
         append_response(client, {"id": req_id, "status": 500, "error": type(e).__name__, "user_id": user_id})
         log.error("Failed uid=%s: %s: %s", uid, type(e).__name__, e)
 
+    _processed_uids.add(uid)
+    if len(_processed_uids) > _MAX_PROCESSED:
+        _processed_uids.clear()
     return True
 
 
