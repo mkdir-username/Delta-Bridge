@@ -13,6 +13,10 @@ from transport import imap_conn, send_request, poll_response
 
 log = logging.getLogger("ioe-web")
 
+_auth_attempts = {}
+_AUTH_LIMIT = 3
+_AUTH_WINDOW = 300
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -73,6 +77,15 @@ class Handler(BaseHTTPRequestHandler):
             if action == "auth_start" and not auth.is_whitelisted(phone):
                 self.respond_json({"status": "error", "error": "not allowed"})
                 return
+            if action == "auth_start":
+                now = time.time()
+                attempts = _auth_attempts.get(phone, [])
+                attempts = [t for t in attempts if now - t < _AUTH_WINDOW]
+                if len(attempts) >= _AUTH_LIMIT:
+                    self.respond_json({"status": "error", "error": "too many attempts, wait 5 min"})
+                    return
+                attempts.append(now)
+                _auth_attempts[phone] = attempts
             req_id = uuid.uuid4().hex[:8]
             login_user_id = phone or "login"
             req = {"id": req_id, "type": "command", "service": "telegram", "action": action, "user_id": login_user_id}
