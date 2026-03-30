@@ -195,6 +195,7 @@ body {
   min-height: 100%;
   font-family: var(--font-sans);
   line-height: 1.5;
+  padding-bottom: var(--footer-height);
 }
 
 /* === Toolbar === */
@@ -514,8 +515,10 @@ main {
 
 /* === Footer / status bar === */
 footer {
-  position: sticky;
+  position: fixed;
   bottom: 0;
+  left: 0;
+  right: 0;
   height: var(--footer-height);
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
@@ -614,11 +617,11 @@ footer .channel { color: var(--text-dim); }
 .tab-bar button.active { color:var(--text); border-bottom:2px solid var(--accent); }
 
 /* === Telegram === */
-.tg-layout { display:flex; height:calc(100vh - 80px); overflow:hidden; }
-.tg-sidebar { width:30%; border-right:1px solid var(--border); overflow-y:auto; }
-.tg-main { flex:1; display:flex; flex-direction:column; }
+.tg-layout { display:flex; height:calc(100vh - 80px); }
+.tg-sidebar { width:30%; min-width:200px; max-width:300px; border-right:1px solid var(--border); overflow-y:auto; flex-shrink:0; }
+.tg-main { flex:1; display:flex; flex-direction:column; min-width:0; }
 .tg-header { padding:12px; font-weight:bold; border-bottom:1px solid var(--border); }
-.tg-messages { flex:1; overflow-y:auto; padding:8px; }
+.tg-messages { flex:1; overflow-y:auto; overflow-x:hidden; padding:8px; min-width:0; }
 .tg-compose { display:flex; padding:8px; gap:8px; border-top:1px solid var(--border); }
 .tg-compose input { flex:1; padding:8px; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:6px; font-family:var(--font-ui); font-size:13px; outline:none; }
 .tg-compose input:focus { border-color:var(--accent); }
@@ -631,8 +634,9 @@ footer .channel { color: var(--text-dim); }
 .tg-msg { padding:6px 0; }
 .tg-msg:hover { background:var(--bg-hover); cursor:pointer; border-radius:4px; }
 .tg-sender { color:var(--accent); font-weight:bold; font-size:13px; }
-.tg-text { margin:2px 0; word-wrap:break-word; overflow-wrap:break-word; white-space:pre-wrap; }
+.tg-text { margin:2px 0; word-wrap:break-word; overflow-wrap:break-word; word-break:break-all; white-space:pre-wrap; }
 .tg-msg { max-width:100%; overflow:hidden; }
+.tg-compose { flex-shrink:0; }
 .tg-time { color:var(--text-dim); font-size:11px; }
 .tg-reply-marker { color:var(--text-muted); font-size:11px; margin-left:4px; }
 .tg-reply-bar { padding:4px 12px; background:var(--bg-surface); border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); }

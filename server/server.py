@@ -315,7 +315,10 @@ def inline_images(html, base_url, max_images=10, max_kb=80):
 
 def do_search(query):
     try:
-        from ddgs import DDGS
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
         results = DDGS().text(query, max_results=10)
         return [
             {"title": r.get("title", ""), "href": r.get("href", ""), "snippet": r.get("body", "")}
