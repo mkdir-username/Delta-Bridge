@@ -79,12 +79,21 @@ class TelegramAdapter:
             dialogs = await self.client.get_dialogs(limit=limit)
             result = []
             for d in dialogs:
+                entity = d.entity
+                dtype = "user"
+                if hasattr(entity, 'megagroup') and entity.megagroup:
+                    dtype = "group"
+                elif hasattr(entity, 'broadcast') and entity.broadcast:
+                    dtype = "channel"
+                elif hasattr(entity, 'title'):
+                    dtype = "group"
                 result.append({
                     "id": d.id,
                     "name": d.name or "",
                     "unread": d.unread_count,
                     "last_message": d.message.text if d.message else "",
                     "date": d.date.isoformat() if d.date else "",
+                    "type": dtype,
                 })
             return result
 
@@ -117,6 +126,7 @@ class TelegramAdapter:
                     "sender": getattr(m.sender, "first_name", "") or str(m.sender_id or ""),
                     "text": m.text or "",
                     "date": m.date.isoformat() if m.date else "",
+                    "out": m.out,
                 }
                 if m.reply_to:
                     msg["reply_to_id"] = m.reply_to.reply_to_msg_id
