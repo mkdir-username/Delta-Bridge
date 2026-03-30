@@ -29,6 +29,20 @@ import requests
 
 from crypto import derive_key, encrypt, decrypt
 
+try:
+    from telegram_adapter import TelegramAdapter
+    _tg_adapter = None
+    def _get_telegram_adapter():
+        global _tg_adapter
+        if _tg_adapter is None:
+            _tg_adapter = TelegramAdapter()
+            _tg_adapter.start()
+        return _tg_adapter
+except ImportError:
+    _tg_adapter = None
+    def _get_telegram_adapter():
+        return None
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -390,7 +404,14 @@ def dispatch_request(request):
     if req_type == "http":
         return handle_http_proxy(request)
     if req_type == "command":
-        return {"status": 501, "error": "commands not implemented yet"}
+        service = request.get("service", "")
+        if service == "telegram":
+            adapter = _get_telegram_adapter()
+            if adapter is None:
+                return {"status": 503, "error": "telegram not available (telethon not installed)"}
+            action = request.get("action", "")
+            return adapter.handle(action, request)
+        return {"status": 400, "error": f"unknown service: {service}"}
     if req_type == "session_start":
         sid = request.get("session_id", uuid.uuid4().hex)
         _sessions[sid] = {"session": requests.Session(), "created": time.time()}

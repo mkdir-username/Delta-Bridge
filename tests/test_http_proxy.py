@@ -55,10 +55,10 @@ class TestProtocolRouting(unittest.TestCase):
             mock_h.assert_called_once()
             self.assertEqual(result["status_code"], 200)
 
-    def test_command_type_returns_501(self):
-        result = srv.dispatch_request({"type": "command", "cmd": "ls"})
-        self.assertEqual(result["status"], 501)
-        self.assertIn("not implemented", result["error"])
+    def test_command_type_unknown_service_returns_400(self):
+        result = srv.dispatch_request({"type": "command", "service": "nonexistent"})
+        self.assertEqual(result["status"], 400)
+        self.assertIn("unknown service", result["error"])
 
     def test_unknown_type_returns_400(self):
         result = srv.dispatch_request({"type": "banana"})
