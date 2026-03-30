@@ -356,9 +356,9 @@ main {
 }
 
 /* === Footer / status bar === */
-.kit-bar { display: flex; gap: 8px; padding: 4px 12px; background: var(--bg-surface); border-bottom: 1px solid var(--border); }
-.kit-bar select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 13px; }
-.kit-bar button { background: var(--accent); color: #fff; border: none; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
+.toolbar-toggle { height: 34px; width: 34px; padding: 0; background: transparent; color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.toolbar-toggle:hover { color: var(--text); border-color: var(--text-muted); }
+.toolbar-toggle.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
 
 footer {
   position: fixed;
@@ -510,8 +510,11 @@ footer .channel { color: var(--text-dim); }
 .tg-reply-bar { padding:4px 12px; background:var(--bg-surface); border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); }
 .tg-loading { padding:20px; color:var(--text-dim); text-align:center; }
 .tg-empty { display:flex; align-items:center; justify-content:center; flex:1; color:var(--text-dim); font-size:14px; }
+.auth-step { padding:24px 16px; text-align:center; }
+.auth-title { font-size:15px; font-weight:bold; margin-bottom:8px; }
+.auth-hint { font-size:12px; color:var(--text-dim); margin-bottom:16px; }
+.auth-btn { width:100%; padding:10px; margin-top:8px; background:var(--accent); border:none; color:#fff; border-radius:6px; cursor:pointer; font-family:var(--font-ui); }
+.auth-btn:hover { opacity:0.9; }
+.auth-error { color:#f85; font-size:12px; margin-top:8px; min-height:16px; }
 
-.browser-toggle { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
-.browser-toggle input { accent-color: var(--accent); }
-.toggle-label { user-select: none; }
 """

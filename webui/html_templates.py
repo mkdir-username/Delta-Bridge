@@ -8,16 +8,8 @@ HTML_BROWSER = """<div id="browser-view">
 <div class="toolbar">
   <input type="text" id="url" placeholder="URL или поисковый запрос..."
          autocomplete="off" autocapitalize="off" spellcheck="false" value="">
+  <button id="btnBrowser" class="toolbar-toggle" onclick="toggleBrowserMode()" title="Browser mode">&#127760;</button>
   <button id="btnGo" onclick="go()">&rarr;</button>
-  <label class="browser-toggle" title="Headless browser mode">
-    <input type="checkbox" id="browserMode" onchange="toggleBrowserMode()">
-    <span class="toggle-label">Browser</span>
-  </label>
-</div>
-<div class="kit-bar" id="kit-bar" style="display:none">
-  <select id="kit-select" onchange="loadKitActions()"><option value="">Kit...</option></select>
-  <select id="kit-action" style="display:none"><option value="">Action...</option></select>
-  <button id="kit-run" onclick="runKit()" style="display:none">Run</button>
 </div>
 
 <main id="content">
@@ -53,6 +45,30 @@ HTML_TELEGRAM = """<div id="telegram-view" style="display:none">
         <button class="tg-folder" data-folder="channel" onclick="setFolder('channel')">Channels</button>
         <button class="tg-folder" data-folder="all" onclick="setFolder('all')">All</button>
         <button class="tg-folder" data-folder="unread" onclick="setFolder('unread')">Unread</button>
+      </div>
+      <div id="tg-auth" style="display:none">
+        <div id="auth-step-phone" class="auth-step">
+          <div class="auth-title">Telegram</div>
+          <div class="auth-hint">Код придёт в SMS, доступ к TG не нужен</div>
+          <input type="tel" id="auth-phone" placeholder="+7XXXXXXXXXX" class="tg-search"
+                 onkeydown="if(event.key==='Enter')authStart()">
+          <button onclick="authStart()" class="auth-btn">Отправить код</button>
+          <div id="auth-phone-error" class="auth-error"></div>
+        </div>
+        <div id="auth-step-code" class="auth-step" style="display:none">
+          <div class="auth-title">Код из SMS</div>
+          <input type="text" id="auth-code" placeholder="12345" class="tg-search"
+                 maxlength="6" inputmode="numeric" onkeydown="if(event.key==='Enter')authCode()">
+          <button onclick="authCode()" class="auth-btn">Подтвердить</button>
+          <div id="auth-code-error" class="auth-error"></div>
+        </div>
+        <div id="auth-step-2fa" class="auth-step" style="display:none">
+          <div class="auth-title">Двухфакторный пароль</div>
+          <input type="password" id="auth-password" placeholder="Пароль" class="tg-search"
+                 onkeydown="if(event.key==='Enter')auth2FA()">
+          <button onclick="auth2FA()" class="auth-btn">Войти</button>
+          <div id="auth-2fa-error" class="auth-error"></div>
+        </div>
       </div>
       <div class="tg-chatlist" id="tg-chats">
         <div class="loading"><div class="spinner"></div><div>Loading chats...</div><div class="timer">0.0s</div></div>

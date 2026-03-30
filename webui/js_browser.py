@@ -3,7 +3,8 @@ var lastResults = null;
 var lastMarkdown = '';
 var browserMode = false;
 function toggleBrowserMode() {
-  browserMode = $('browserMode').checked;
+  browserMode = !browserMode;
+  $('btnBrowser').classList.toggle('active', browserMode);
 }
 
 if (typeof marked !== 'undefined') {
@@ -303,7 +304,7 @@ function loadKits() {
       o.textContent = kitData[i].service;
       sel.appendChild(o);
     }
-    if (kitData.length > 0) $('kit-bar').style.display = '';
+    if (kitData.length > 0) $('kit-select').style.display = '';
   }).catch(function(){});
 }
 function loadKitActions() {
