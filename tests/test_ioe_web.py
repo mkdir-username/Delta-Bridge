@@ -609,3 +609,93 @@ class TestKitEndpoint:
         services = [k["service"] for k in data["kits"]]
         assert "_template_auth" not in services
         server.server_close()
+
+
+class TestBrowserMode:
+    def test_html_has_browser_mode_toggle(self):
+        html = get_html()
+        assert 'id="browserMode"' in html
+        assert 'toggleBrowserMode' in html
+
+    def test_css_has_browser_toggle_style(self):
+        html = get_html()
+        assert '.browser-toggle' in html
+
+    def test_js_has_browser_mode_var(self):
+        html = get_html()
+        assert 'var browserMode' in html
+        assert 'toggleBrowserMode' in html
+
+    def test_js_openpage_checks_browser_mode(self):
+        html = get_html()
+        assert 'browserMode' in html
+        assert '/browser?' in html
+
+    def test_browser_endpoint_demo_mode(self):
+        import ioe_web
+        old = ioe_web.DEMO_MODE
+        ioe_web.DEMO_MODE = True
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        resp = urlopen("http://127.0.0.1:{}/browser?url=https://example.com".format(port), timeout=5)
+        data = json.loads(resp.read().decode())
+        assert data["status"] == "error"
+        assert "demo" in data["error"]
+        server.server_close()
+        ioe_web.DEMO_MODE = old
+
+    def test_browser_endpoint_returns_pending(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with patch.object(handler, 'imap_conn') as mock_conn, \
+             patch.object(handler, 'send_request'):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            resp = urlopen("http://127.0.0.1:{}/browser?url=https://example.com".format(port), timeout=5)
+            data = json.loads(resp.read().decode())
+            assert data["status"] == "pending"
+            assert "id" in data
+        server.server_close()
+
+    def test_browser_endpoint_sends_browser_type(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        sent_data = {}
+        def capture_send(m, req):
+            sent_data.update(req)
+        with patch.object(handler, 'imap_conn') as mock_conn, \
+             patch.object(handler, 'send_request', side_effect=capture_send):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            urlopen("http://127.0.0.1:{}/browser?url=https://example.com".format(port), timeout=5)
+        assert sent_data.get("type") == "browser"
+        assert sent_data.get("url") == "https://example.com"
+        assert "goto" in sent_data.get("actions", [])
+        server.server_close()
+
+    def test_browser_endpoint_includes_user_id(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        sent_data = {}
+        def capture_send(m, req):
+            sent_data.update(req)
+        old_uid = ioe_web.USER_ID
+        ioe_web.USER_ID = "test_user"
+        try:
+            with patch.object(handler, 'imap_conn') as mock_conn, \
+                 patch.object(handler, 'send_request', side_effect=capture_send):
+                mock_conn.return_value = MagicMock()
+                t = threading.Thread(target=server.handle_request, daemon=True)
+                t.start()
+                urlopen("http://127.0.0.1:{}/browser?url=https://example.com&user_id=web_user".format(port), timeout=5)
+            assert sent_data.get("user_id") == "web_user"
+        finally:
+            ioe_web.USER_ID = old_uid
+            server.server_close()

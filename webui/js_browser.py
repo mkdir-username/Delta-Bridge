@@ -1,6 +1,10 @@
 JS_BROWSER = r"""var busy = false, pollTimer = null, loadTimer = null, t0 = 0;
 var lastResults = null;
 var lastMarkdown = '';
+var browserMode = false;
+function toggleBrowserMode() {
+  browserMode = $('browserMode').checked;
+}
 
 if (typeof marked !== 'undefined') {
   var ioeRenderer = new marked.Renderer();
@@ -97,7 +101,10 @@ function doSearch(query) {
 function openPage(url) {
   showLoading('\u0417\u0430\u0433\u0440\u0443\u0436\u0430\u044e...');
   urlInput.value = url;
-  fetch('/get?url=' + encodeURIComponent(url) + '&user_id=' + encodeURIComponent(userId))
+  var endpoint = browserMode
+    ? '/browser?url=' + encodeURIComponent(url) + '&user_id=' + encodeURIComponent(userId)
+    : '/get?url=' + encodeURIComponent(url) + '&user_id=' + encodeURIComponent(userId);
+  fetch(endpoint)
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.error) { showError(d.error); return; }

@@ -238,4 +238,34 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"status": "error", "error": "kit execution via WebUI not yet supported"})
             return
 
+        if parsed.path == "/browser":
+            req_id = uuid.uuid4().hex[:8]
+            url = qs.get("url", [""])[0]
+
+            if ioe_web.DEMO_MODE:
+                self.respond_json({"status": "error", "error": "browser not available in demo"})
+                return
+
+            req = {
+                "id": req_id,
+                "type": "browser",
+                "url": url,
+                "actions": ["goto"],
+                "user_id": user_id,
+            }
+            try:
+                log.info("[%s] browser: %s", req_id, url)
+                m = imap_conn()
+                send_request(m, req)
+                m.logout()
+            except Exception as e:
+                log.error("[%s] browser send FAILED: %s", req_id, e)
+                self.respond_json({"status": "error", "error": str(e)})
+                return
+
+            t = threading.Thread(target=poll_response, args=(req_id,), daemon=True)
+            t.start()
+            self.respond_json({"id": req_id, "status": "pending"})
+            return
+
         self.send_error(404)

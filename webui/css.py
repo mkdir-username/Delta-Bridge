@@ -510,4 +510,8 @@ footer .channel { color: var(--text-dim); }
 .tg-reply-bar { padding:4px 12px; background:var(--bg-surface); border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); }
 .tg-loading { padding:20px; color:var(--text-dim); text-align:center; }
 .tg-empty { display:flex; align-items:center; justify-content:center; flex:1; color:var(--text-dim); font-size:14px; }
+
+.browser-toggle { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.browser-toggle input { accent-color: var(--accent); }
+.toggle-label { user-select: none; }
 """

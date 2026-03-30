@@ -9,6 +9,10 @@ HTML_BROWSER = """<div id="browser-view">
   <input type="text" id="url" placeholder="URL или поисковый запрос..."
          autocomplete="off" autocapitalize="off" spellcheck="false" value="">
   <button id="btnGo" onclick="go()">&rarr;</button>
+  <label class="browser-toggle" title="Headless browser mode">
+    <input type="checkbox" id="browserMode" onchange="toggleBrowserMode()">
+    <span class="toggle-label">Browser</span>
+  </label>
 </div>
 <div class="kit-bar" id="kit-bar" style="display:none">
   <select id="kit-select" onchange="loadKitActions()"><option value="">Kit...</option></select>
