@@ -10,6 +10,7 @@ import io
 import base64
 import ipaddress
 import socket
+import fcntl
 import email as email_mod
 import email.utils
 from email.mime.multipart import MIMEMultipart
@@ -535,7 +536,23 @@ def process_message(client, uid, raw):
     return True
 
 
+LOCK_FILE = "/tmp/ioe-server.lock"
+
+
+def _acquire_lock():
+    fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log.error("Another instance is running (lock: %s). Exiting.", LOCK_FILE)
+        sys.exit(1)
+    fd.write(str(os.getpid()))
+    fd.flush()
+    return fd
+
+
 def main():
+    _lock_fd = _acquire_lock()  # noqa: F841 — prevent GC releasing the lock
     log.info("IoE server v2 starting")
     while True:
         try:
