@@ -1,5 +1,6 @@
 """IoE HTTP request handler."""
 import json
+import os
 import uuid
 import time
 import threading
@@ -215,6 +216,26 @@ class Handler(BaseHTTPRequestHandler):
                 notifs = list(ioe_web.notification_queue)
                 ioe_web.notification_queue.clear()
             self.respond_json({"notifications": notifs})
+            return
+
+        if parsed.path == "/kit":
+            import glob as _glob
+            kit_name = qs.get("kit", [""])[0]
+            kits_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kits")
+            if not kit_name:
+                kits = []
+                for f in sorted(_glob.glob(os.path.join(kits_dir, "*.json"))):
+                    if os.path.basename(f).startswith("_"):
+                        continue
+                    try:
+                        with open(f) as fh:
+                            k = json.load(fh)
+                            kits.append({"file": os.path.basename(f), "service": k.get("service", ""), "description": k.get("description", ""), "actions": list(k.get("actions", {}).keys())})
+                    except Exception:
+                        continue
+                self.respond_json({"kits": kits})
+                return
+            self.respond_json({"status": "error", "error": "kit execution via WebUI not yet supported"})
             return
 
         self.send_error(404)

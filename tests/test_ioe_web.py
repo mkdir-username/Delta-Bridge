@@ -582,3 +582,30 @@ class TestNotifications:
             assert "req123" in ioe_web.pending
         ioe_web.notification_queue.clear()
         ioe_web.pending.pop("req123", None)
+
+
+class TestKitEndpoint:
+    def test_kit_list_returns_kits(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        resp = urlopen("http://127.0.0.1:{}/kit".format(port), timeout=5)
+        data = json.loads(resp.read().decode())
+        assert "kits" in data
+        services = [k["service"] for k in data["kits"]]
+        assert "hackernews" in services
+        server.server_close()
+
+    def test_kit_list_excludes_templates(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        resp = urlopen("http://127.0.0.1:{}/kit".format(port), timeout=5)
+        data = json.loads(resp.read().decode())
+        services = [k["service"] for k in data["kits"]]
+        assert "_template_auth" not in services
+        server.server_close()

@@ -283,4 +283,44 @@ function promptUserId() {
 }
 
 urlInput.focus();
+
+var kitData = [];
+function loadKits() {
+  fetch('/kit').then(function(r){return r.json()}).then(function(d) {
+    kitData = d.kits || [];
+    var sel = $('kit-select');
+    sel.innerHTML = '<option value="">Kit...</option>';
+    for (var i = 0; i < kitData.length; i++) {
+      var o = document.createElement('option');
+      o.value = i;
+      o.textContent = kitData[i].service;
+      sel.appendChild(o);
+    }
+    if (kitData.length > 0) $('kit-bar').style.display = '';
+  }).catch(function(){});
+}
+function loadKitActions() {
+  var idx = $('kit-select').value;
+  var actSel = $('kit-action');
+  var btn = $('kit-run');
+  if (idx === '') { actSel.style.display = 'none'; btn.style.display = 'none'; return; }
+  var kit = kitData[parseInt(idx)];
+  actSel.innerHTML = '<option value="">Action...</option>';
+  for (var j = 0; j < kit.actions.length; j++) {
+    var o = document.createElement('option');
+    o.value = kit.actions[j];
+    o.textContent = kit.actions[j];
+    actSel.appendChild(o);
+  }
+  actSel.style.display = '';
+  btn.style.display = '';
+}
+function runKit() {
+  var idx = $('kit-select').value;
+  var action = $('kit-action').value;
+  if (idx === '' || !action) return;
+  var kit = kitData[parseInt(idx)];
+  content.innerHTML = '<div class="loading"><div class="spinner"></div><div>Running ' + escHtml(kit.service) + '.' + escHtml(action) + '...</div></div>';
+}
+loadKits();
 """

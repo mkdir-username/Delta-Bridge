@@ -356,6 +356,10 @@ main {
 }
 
 /* === Footer / status bar === */
+.kit-bar { display: flex; gap: 8px; padding: 4px 12px; background: var(--bg-surface); border-bottom: 1px solid var(--border); }
+.kit-bar select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 13px; }
+.kit-bar button { background: var(--accent); color: #fff; border: none; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
+
 footer {
   position: fixed;
   bottom: 0;

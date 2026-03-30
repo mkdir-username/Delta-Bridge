@@ -10,6 +10,11 @@ HTML_BROWSER = """<div id="browser-view">
          autocomplete="off" autocapitalize="off" spellcheck="false" value="">
   <button id="btnGo" onclick="go()">&rarr;</button>
 </div>
+<div class="kit-bar" id="kit-bar" style="display:none">
+  <select id="kit-select" onchange="loadKitActions()"><option value="">Kit...</option></select>
+  <select id="kit-action" style="display:none"><option value="">Action...</option></select>
+  <button id="kit-run" onclick="runKit()" style="display:none">Run</button>
+</div>
 
 <main id="content">
   <div class="empty">
