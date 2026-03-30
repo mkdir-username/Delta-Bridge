@@ -629,7 +629,7 @@ footer .channel { color: var(--text-dim); }
 .tg-folder:hover { color:var(--text); }
 .tg-folder.active { color:var(--accent); border-bottom-color:var(--accent); }
 .tg-folder .tg-folder-badge { background:var(--accent); color:#fff; border-radius:8px; padding:0 5px; font-size:10px; margin-left:4px; }
-.tg-chatlist { flex:1; overflow-y:auto; }
+.tg-chatlist { flex:1; overflow-y:auto; display:flex; flex-direction:column; }
 .tg-main { flex:1; display:flex; flex-direction:column; min-width:0; }
 .tg-header { padding:12px; font-weight:bold; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
 .tg-messages { flex:1; overflow-y:auto; overflow-x:hidden; padding:12px 16px; min-width:0; display:flex; flex-direction:column; gap:2px; }
