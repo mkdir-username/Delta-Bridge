@@ -615,7 +615,7 @@ def main():
                             client.delete_messages([uid])
                             client.expunge()
                             log.info("Deleted uid=%s from queue", uid)
-                    time.sleep(3)
+                    time.sleep(1)
         except Exception as e:
             log.error("Connection error: %s, reconnecting in 5s", e)
             time.sleep(5)
