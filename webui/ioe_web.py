@@ -98,6 +98,8 @@ def poll_response(req_id):
             for uid in reversed(new_uids):
                 seen_uids.add(uid)
                 _, data = m.fetch(uid, "(RFC822)")
+                if not data or not data[0] or data[0] is None:
+                    continue
                 raw = data[0][1]
                 if not isinstance(raw, bytes):
                     continue
@@ -612,7 +614,7 @@ footer .channel { color: var(--text-dim); }
 .tab-bar button.active { color:var(--text); border-bottom:2px solid var(--accent); }
 
 /* === Telegram === */
-.tg-layout { display:flex; height:calc(100vh - 80px); }
+.tg-layout { display:flex; height:calc(100vh - 80px); overflow:hidden; }
 .tg-sidebar { width:30%; border-right:1px solid var(--border); overflow-y:auto; }
 .tg-main { flex:1; display:flex; flex-direction:column; }
 .tg-header { padding:12px; font-weight:bold; border-bottom:1px solid var(--border); }
@@ -629,7 +631,8 @@ footer .channel { color: var(--text-dim); }
 .tg-msg { padding:6px 0; }
 .tg-msg:hover { background:var(--bg-hover); cursor:pointer; border-radius:4px; }
 .tg-sender { color:var(--accent); font-weight:bold; font-size:13px; }
-.tg-text { margin:2px 0; }
+.tg-text { margin:2px 0; word-wrap:break-word; overflow-wrap:break-word; white-space:pre-wrap; }
+.tg-msg { max-width:100%; overflow:hidden; }
 .tg-time { color:var(--text-dim); font-size:11px; }
 .tg-reply-marker { color:var(--text-muted); font-size:11px; margin-left:4px; }
 .tg-reply-bar { padding:4px 12px; background:var(--bg-surface); border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); }
@@ -1140,8 +1143,13 @@ function cancelReply() {
 
 function sendTgMessage() {
   var input = document.getElementById('tg-input');
+  var btn = document.querySelector('.tg-compose button');
   var text = input.value.trim();
   if (!text || !currentChatId) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  input.disabled = true;
 
   var url;
   if (replyToId) {
@@ -1154,12 +1162,23 @@ function sendTgMessage() {
     if (data.status === 'pending') {
       pollTgStatus(data.id, function() {
         input.value = '';
+        input.disabled = false;
+        btn.disabled = false;
+        btn.textContent = 'Send';
         cancelReply();
         var title = document.getElementById('tg-chat-title').textContent;
         openChat(currentChatId, null);
         document.getElementById('tg-chat-title').textContent = title;
       });
+    } else {
+      input.disabled = false;
+      btn.disabled = false;
+      btn.textContent = 'Send';
     }
+  }).catch(function() {
+    input.disabled = false;
+    btn.disabled = false;
+    btn.textContent = 'Send';
   });
 }
 
@@ -1223,7 +1242,7 @@ class Handler(BaseHTTPRequestHandler):
                         result = {"status": "ready"}
                         if "results" in resp:
                             result["results"] = resp["results"]
-                        elif resp.get("type") == "command" or "dialogs" in resp or "messages" in resp or "unread_chats" in resp:
+                        elif resp.get("type") == "command" or "dialogs" in resp or "messages" in resp or "unread_chats" in resp or "message_id" in resp or "auth_status" in resp or "results" not in resp and "body" not in resp:
                             for key in resp:
                                 if key not in ("id", "status"):
                                     result[key] = resp[key]
@@ -1336,11 +1355,12 @@ class Handler(BaseHTTPRequestHandler):
                     req["chat_id"] = int(req["chat_id"])
                 except ValueError:
                     pass
-            if "limit" in req:
-                try:
-                    req["limit"] = int(req["limit"])
-                except ValueError:
-                    pass
+            for int_key in ("limit", "reply_to_id", "message_id"):
+                if int_key in req:
+                    try:
+                        req[int_key] = int(req[int_key])
+                    except ValueError:
+                        pass
 
             try:
                 log.info("[%s] tg: %s", req_id, action)
