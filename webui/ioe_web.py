@@ -80,8 +80,8 @@ def main():
         if arg == "--demo" and i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit():
             port = int(sys.argv[i + 1])
             break
-    from auth import load_users
-    load_users()
+    from auth import load_whitelist
+    load_whitelist()
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(("0.0.0.0", port), Handler)
     mode = " (demo)" if DEMO_MODE else ""

@@ -2,7 +2,6 @@ from css import login_css
 
 
 def login_page(error=""):
-    error_html = '<div class="login-error">{}</div>'.format(error) if error else ""
     return """<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -16,7 +15,7 @@ def login_page(error=""):
 }}
 *, *::before, *::after {{ box-sizing:border-box; margin:0; padding:0; }}
 html {{ background:var(--bg-base); color:var(--text-main); height:100%; }}
-body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; height:100%; }}
+body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Arial,sans-serif; height:100%; }}
 {css}
 </style>
 </head>
@@ -25,15 +24,191 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,
   <div class="login-logo">&#9889;</div>
   <div class="login-title">IoE</div>
   <div class="login-subtitle">internet over email</div>
-  <form class="login-form" method="POST" action="/login">
-    <input type="text" name="username" placeholder="Username" autocomplete="username" required>
-    <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
-    <button type="submit">Войти</button>
-  </form>
-  {error}
+
+  <div id="step-phone" class="login-form">
+    <div class="login-hint">Авторизация через Telegram</div>
+    <input type="tel" id="phone" placeholder="+7XXXXXXXXXX"
+           onkeydown="if(event.key===\'Enter\')authStart()">
+    <button onclick="authStart()">Войти через Telegram</button>
+    <div id="phone-error" class="login-error"></div>
+  </div>
+
+  <div id="step-code" class="login-form" style="display:none">
+    <div class="login-hint">Код из SMS</div>
+    <input type="text" id="code" placeholder="12345" maxlength="6" inputmode="numeric"
+           onkeydown="if(event.key===\'Enter\')authCode()">
+    <button onclick="authCode()">Подтвердить</button>
+    <div id="code-error" class="login-error"></div>
+  </div>
+
+  <div id="step-2fa" class="login-form" style="display:none">
+    <div class="login-hint">Двухфакторный пароль</div>
+    <input type="password" id="password2fa" placeholder="Пароль"
+           onkeydown="if(event.key===\'Enter\')auth2FA()">
+    <button onclick="auth2FA()">Войти</button>
+    <div id="2fa-error" class="login-error"></div>
+  </div>
+
+  <div id="step-loading" class="login-form" style="display:none">
+    <div class="login-hint" id="loading-text">Отправка кода...</div>
+    <div class="login-timer" id="loading-timer">0s</div>
+  </div>
 </div>
+
+<script>
+var currentPhone = \'\';
+var currentReqId = \'\';
+var pollCount = 0;
+var pollTimer = null;
+var loadingSeconds = 0;
+var loadingTimer = null;
+
+function showStep(name) {{
+  [\'phone\',\'code\',\'2fa\',\'loading\'].forEach(function(s) {{
+    document.getElementById(\'step-\'+s).style.display = s===name ? \'\' : \'none\';
+  }});
+}}
+
+function showLoading(text) {{
+  document.getElementById(\'loading-text\').textContent = text;
+  loadingSeconds = 0;
+  document.getElementById(\'loading-timer\').textContent = \'0s\';
+  showStep(\'loading\');
+  if (loadingTimer) clearInterval(loadingTimer);
+  loadingTimer = setInterval(function() {{
+    loadingSeconds++;
+    document.getElementById(\'loading-timer\').textContent = loadingSeconds + \'s\';
+  }}, 1000);
+}}
+
+function stopLoading() {{
+  if (loadingTimer) {{ clearInterval(loadingTimer); loadingTimer = null; }}
+}}
+
+function authStart() {{
+  var phone = document.getElementById(\'phone\').value.trim();
+  if (!phone) return;
+  document.getElementById(\'phone-error\').textContent = \'\';
+  fetch(\'/login/check_phone?phone=\'+encodeURIComponent(phone))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (!d.allowed) {{
+        document.getElementById(\'phone-error\').textContent = d.error === \'rate_limit\' ? \'Слишком много попыток\' : \'Номер не разрешён\';
+        return;
+      }}
+      currentPhone = phone;
+      showLoading(\'Отправка кода...\');
+      fetch(\'/login/tg?action=auth_start&phone=\'+encodeURIComponent(phone))
+        .then(function(r) {{ return r.json(); }})
+        .then(function(d) {{
+          if (d.status === \'error\') {{
+            stopLoading();
+            showStep(\'phone\');
+            document.getElementById(\'phone-error\').textContent = d.error;
+            return;
+          }}
+          currentReqId = d.id;
+          pollCount = 0;
+          pollStatus(function(resp) {{
+            stopLoading();
+            if (resp.auth_status === \'code_needed\' || resp.status === \'ready\') {{
+              showStep(\'code\');
+              document.getElementById(\'code\').focus();
+            }} else {{
+              showStep(\'phone\');
+              document.getElementById(\'phone-error\').textContent = resp.error || \'Ошибка\';
+            }}
+          }});
+        }});
+    }});
+}}
+
+function authCode() {{
+  var code = document.getElementById(\'code\').value.trim();
+  if (!code) return;
+  document.getElementById(\'code-error\').textContent = \'\';
+  showLoading(\'Проверка кода...\');
+  fetch(\'/login/tg?action=auth_code&code=\'+encodeURIComponent(code)+\'&phone=\'+encodeURIComponent(currentPhone))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (d.status === \'error\') {{
+        stopLoading();
+        showStep(\'code\');
+        document.getElementById(\'code-error\').textContent = d.error;
+        return;
+      }}
+      currentReqId = d.id;
+      pollCount = 0;
+      pollStatus(function(resp) {{
+        stopLoading();
+        if (resp.auth_status === \'authorized\' && resp.sid) {{
+          document.cookie = \'sid=\'+resp.sid+\'; path=/; SameSite=Strict\';
+          window.location.href = \'/\';
+        }} else if (resp.auth_status === \'2fa_needed\') {{
+          showStep(\'2fa\');
+          document.getElementById(\'password2fa\').focus();
+        }} else {{
+          showStep(\'code\');
+          document.getElementById(\'code-error\').textContent = resp.error || \'Неверный код\';
+        }}
+      }});
+    }});
+}}
+
+function auth2FA() {{
+  var pw = document.getElementById(\'password2fa\').value.trim();
+  if (!pw) return;
+  document.getElementById(\'2fa-error\').textContent = \'\';
+  showLoading(\'Проверка пароля...\');
+  fetch(\'/login/tg?action=auth_code&password=\'+encodeURIComponent(pw)+\'&phone=\'+encodeURIComponent(currentPhone))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (d.status === \'error\') {{
+        stopLoading();
+        showStep(\'2fa\');
+        document.getElementById(\'2fa-error\').textContent = d.error;
+        return;
+      }}
+      currentReqId = d.id;
+      pollCount = 0;
+      pollStatus(function(resp) {{
+        stopLoading();
+        if (resp.auth_status === \'authorized\' && resp.sid) {{
+          document.cookie = \'sid=\'+resp.sid+\'; path=/; SameSite=Strict\';
+          window.location.href = \'/\';
+        }} else {{
+          showStep(\'2fa\');
+          document.getElementById(\'2fa-error\').textContent = resp.error || \'Неверный пароль\';
+        }}
+      }});
+    }});
+}}
+
+function pollStatus(callback) {{
+  if (pollTimer) clearTimeout(pollTimer);
+  pollCount++;
+  if (pollCount > 60) {{
+    stopLoading();
+    showStep(\'phone\');
+    document.getElementById(\'phone-error\').textContent = \'Таймаут ожидания\';
+    return;
+  }}
+  fetch(\'/login/status?id=\'+encodeURIComponent(currentReqId)+\'&phone=\'+encodeURIComponent(currentPhone))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (d.status === \'pending\') {{
+        pollTimer = setTimeout(function() {{ pollStatus(callback); }}, 2000);
+      }} else {{
+        callback(d);
+      }}
+    }})
+    .catch(function() {{
+      pollTimer = setTimeout(function() {{ pollStatus(callback); }}, 2000);
+    }});
+}}
+</script>
 </body>
-</html>""".format(css=login_css(), error=error_html)
+</html>""".format(css=login_css())
 
 
 HTML_TAB_BAR = """<div class="tab-bar">

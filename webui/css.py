@@ -529,6 +529,8 @@ LOGIN_CSS = """\
 .login-form input:focus { outline:none; border-color:var(--accent); }
 .login-form button { width:100%; padding:10px; margin-top:4px; background:var(--accent); border:none; color:#fff; border-radius:6px; cursor:pointer; font-size:14px; }
 .login-error { color:#f85; font-size:12px; margin-top:8px; }
+.login-hint { font-size:12px; color:var(--text-dim); margin-bottom:12px; }
+.login-timer { font-size:11px; color:var(--text-dim); margin-top:8px; }
 """
 
 

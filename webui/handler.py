@@ -56,6 +56,58 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/login":
             self._serve_login()
             return
+        if parsed.path == "/login/check_phone":
+            phone = qs.get("phone", [""])[0]
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self.respond_json({"allowed": False, "error": "rate_limit"})
+                return
+            self.respond_json({"allowed": auth.is_whitelisted(phone)})
+            return
+        if parsed.path.startswith("/login/tg"):
+            action = qs.get("action", [""])[0]
+            if action not in ("auth_start", "auth_code", "check_auth"):
+                self.respond_json({"status": "error", "error": "forbidden action"})
+                return
+            phone = qs.get("phone", [""])[0]
+            if action == "auth_start" and not auth.is_whitelisted(phone):
+                self.respond_json({"status": "error", "error": "not allowed"})
+                return
+            req_id = uuid.uuid4().hex[:8]
+            login_user_id = phone or "login"
+            req = {"id": req_id, "type": "command", "service": "telegram", "action": action, "user_id": login_user_id}
+            for key in qs:
+                if key not in ("action", "user_id"):
+                    req[key] = qs[key][0]
+            try:
+                m = imap_conn()
+                send_request(m, req)
+                m.logout()
+            except Exception as e:
+                self.respond_json({"status": "error", "error": str(e)})
+                return
+            t = threading.Thread(target=poll_response, args=(login_user_id, req_id), daemon=True)
+            t.start()
+            self.respond_json({"id": req_id, "status": "pending"})
+            return
+        if parsed.path == "/login/status":
+            req_id = qs.get("id", [""])[0]
+            phone = qs.get("phone", [""])[0]
+            login_user_id = phone or "login"
+            with ioe_web.lock:
+                if (login_user_id, req_id) in ioe_web.pending:
+                    resp = ioe_web.pending.pop((login_user_id, req_id))
+                    result = {"status": "ready"}
+                    for key in resp:
+                        if key != "id":
+                            result[key] = resp[key]
+                    if result.get("auth_status") == "authorized":
+                        sid = auth.create_session(login_user_id)
+                        result["sid"] = sid
+                    self.respond_json(result)
+                    return
+            self.respond_json({"status": "pending"})
+            return
         if parsed.path == "/logout":
             auth.delete_session(self.headers.get("Cookie", ""))
             self.send_response(302)
@@ -301,26 +353,6 @@ class Handler(BaseHTTPRequestHandler):
         from transport import imap_conn, send_request, poll_response
 
         parsed = urlparse(self.path)
-
-        if parsed.path == "/login":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length).decode()
-            params = parse_qs(body)
-            username = params.get("username", [""])[0]
-            password = params.get("password", [""])[0]
-            ip = self.client_address[0]
-            if not auth.check_rate_limit(ip):
-                self._serve_login("Слишком много попыток. Подожди минуту.", 429)
-                return
-            if username and password and auth.verify_password(username, password):
-                sid = auth.create_session(username)
-                self.send_response(302)
-                self.send_header("Location", "/")
-                self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/".format(sid))
-                self.end_headers()
-            else:
-                self._serve_login("Неверный логин или пароль")
-            return
 
         user_id = auth.get_authenticated_user(self.headers.get("Cookie", ""))
         if not user_id:
