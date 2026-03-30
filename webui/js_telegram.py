@@ -322,7 +322,7 @@ function authStart() {
   var btn = document.querySelector('#auth-step-phone .auth-btn');
   btn.textContent = '...';
   document.getElementById('auth-phone-error').textContent = '';
-  fetch('/tg?action=auth_start&phone=' + encodeURIComponent(phone))
+  fetch('/tg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'auth_start', phone:phone})})
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
@@ -354,7 +354,7 @@ function authCode() {
   var btn = document.querySelector('#auth-step-code .auth-btn');
   btn.textContent = '...';
   document.getElementById('auth-code-error').textContent = '';
-  fetch('/tg?action=auth_code&code=' + encodeURIComponent(code))
+  fetch('/tg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'auth_code', code:code})})
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {

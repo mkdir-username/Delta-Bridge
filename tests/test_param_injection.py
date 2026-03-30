@@ -125,8 +125,9 @@ class TestParamInjection:
         assert "url" not in sent_data
         server.server_close()
 
-    def test_login_tg_blocks_type_injection(self):
+    def test_login_tg_post_blocks_type_injection(self):
         import ioe_web
+        import transport as transport_mod
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
@@ -134,15 +135,21 @@ class TestParamInjection:
         def capture_send(m, req):
             sent_data.update(req)
 
-        with patch.object(handler, 'imap_conn') as mock_conn, \
+        with patch.object(handler, 'imap_conn') as mc1, \
              patch.object(handler, 'send_request', side_effect=capture_send), \
+             patch.object(transport_mod, 'imap_conn') as mc2, \
+             patch.object(transport_mod, 'send_request', side_effect=capture_send), \
              patch.object(auth, 'is_whitelisted', return_value=True), \
              patch.object(auth, 'check_rate_limit', return_value=True):
-            mock_conn.return_value = MagicMock()
+            mc1.return_value = MagicMock()
+            mc2.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/login/tg?action=auth_start&phone=+79991234567&type=http&url=http://169.254.169.254/".format(port), timeout=5)
+            body = json.dumps({"action": "auth_start", "phone": "+79991234567", "type": "http", "url": "http://169.254.169.254/"}).encode()
+            req = Request("http://127.0.0.1:{}/login/tg".format(port), data=body,
+                         headers={"Content-Type": "application/json"})
+            urlopen(req, timeout=5)
 
-        assert sent_data.get("type") == "command", "type should be 'command' in login/tg"
-        assert "url" not in sent_data, "url should not be forwarded in login/tg"
+        assert sent_data.get("type") == "command", "type should be 'command' in login/tg POST"
+        assert "url" not in sent_data, "url should not be forwarded in login/tg POST"
         server.server_close()

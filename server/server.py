@@ -153,14 +153,15 @@ def validate_url(url):
     except ValueError as e:
         if "Private" in str(e) or "Blocked" in str(e):
             raise
-        try:
-            resolved = socket.getaddrinfo(host, None, socket.AF_INET)
-            for _, _, _, _, addr in resolved:
-                ip = ipaddress.ip_address(addr[0])
-                if ip.is_private or ip.is_loopback or ip.is_link_local:
-                    raise ValueError("Resolved to private IP")
-        except socket.gaierror:
-            pass
+        for family in (socket.AF_INET, socket.AF_INET6):
+            try:
+                resolved = socket.getaddrinfo(host, None, family)
+                for _, _, _, _, addr in resolved:
+                    ip = ipaddress.ip_address(addr[0])
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                        raise ValueError("Resolved to private IP")
+            except socket.gaierror:
+                pass
 
 
 def check_rate_limit(user_id="default"):
@@ -425,7 +426,8 @@ def handle_http_proxy(request):
         _cleanup_sessions()
 
         req_headers = {**{"User-Agent": UA}, **headers}
-        kwargs = {"headers": req_headers, "cookies": cookies, "timeout": FETCH_TIMEOUT}
+        kwargs = {"headers": req_headers, "cookies": cookies, "timeout": FETCH_TIMEOUT,
+                  "allow_redirects": False}
 
         if body and method in ("POST", "PUT", "PATCH"):
             if content_type == "form":
@@ -439,6 +441,19 @@ def handle_http_proxy(request):
             requester = requests
 
         resp = requester.request(method, url, **kwargs)
+
+        redirect_count = 0
+        while resp.status_code in (301, 302, 303, 307, 308) and redirect_count < 5:
+            location = resp.headers.get("Location", "")
+            if not location:
+                break
+            from urllib.parse import urljoin
+            location = urljoin(str(resp.url), location)
+            validate_url(location)
+            resp = requester.request("GET", location, headers=req_headers,
+                                     cookies=cookies, timeout=FETCH_TIMEOUT,
+                                     allow_redirects=False)
+            redirect_count += 1
 
         result = {
             "type": "http_response",

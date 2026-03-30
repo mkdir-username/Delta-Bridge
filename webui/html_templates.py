@@ -89,37 +89,29 @@ function authStart() {{
   var phone = document.getElementById(\'phone\').value.trim();
   if (!phone) return;
   document.getElementById(\'phone-error\').textContent = \'\';
-  fetch(\'/login/check_phone?phone=\'+encodeURIComponent(phone))
+  currentPhone = phone;
+  showLoading(\'Отправка кода...\');
+  fetch(\'/login/tg\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}}, body:JSON.stringify({{action:\'auth_start\', phone:phone}})}})
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
-      if (!d.allowed) {{
-        document.getElementById(\'phone-error\').textContent = d.error === \'rate_limit\' ? \'Слишком много попыток\' : \'Номер не разрешён\';
+      if (d.status === \'error\') {{
+        stopLoading();
+        showStep(\'phone\');
+        document.getElementById(\'phone-error\').textContent = d.error;
         return;
       }}
-      currentPhone = phone;
-      showLoading(\'Отправка кода...\');
-      fetch(\'/login/tg?action=auth_start&phone=\'+encodeURIComponent(phone))
-        .then(function(r) {{ return r.json(); }})
-        .then(function(d) {{
-          if (d.status === \'error\') {{
-            stopLoading();
-            showStep(\'phone\');
-            document.getElementById(\'phone-error\').textContent = d.error;
-            return;
-          }}
-          currentReqId = d.id;
-          pollCount = 0;
-          pollStatus(function(resp) {{
-            stopLoading();
-            if (resp.auth_status === \'code_needed\' || resp.status === \'ready\') {{
-              showStep(\'code\');
-              document.getElementById(\'code\').focus();
-            }} else {{
-              showStep(\'phone\');
-              document.getElementById(\'phone-error\').textContent = resp.error || \'Ошибка\';
-            }}
-          }});
-        }});
+      currentReqId = d.id;
+      pollCount = 0;
+      pollStatus(function(resp) {{
+        stopLoading();
+        if (resp.auth_status === \'code_needed\' || resp.status === \'ready\') {{
+          showStep(\'code\');
+          document.getElementById(\'code\').focus();
+        }} else {{
+          showStep(\'phone\');
+          document.getElementById(\'phone-error\').textContent = resp.error || \'Ошибка\';
+        }}
+      }});
     }});
 }}
 
@@ -128,7 +120,7 @@ function authCode() {{
   if (!code) return;
   document.getElementById(\'code-error\').textContent = \'\';
   showLoading(\'Проверка кода...\');
-  fetch(\'/login/tg?action=auth_code&code=\'+encodeURIComponent(code)+\'&phone=\'+encodeURIComponent(currentPhone))
+  fetch(\'/login/tg\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}}, body:JSON.stringify({{action:\'auth_code\', code:code, phone:currentPhone}})}})
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
       if (d.status === \'error\') {{
@@ -159,7 +151,7 @@ function auth2FA() {{
   if (!pw) return;
   document.getElementById(\'2fa-error\').textContent = \'\';
   showLoading(\'Проверка пароля...\');
-  fetch(\'/login/tg?action=auth_code&password=\'+encodeURIComponent(pw)+\'&phone=\'+encodeURIComponent(currentPhone))
+  fetch(\'/login/tg\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}}, body:JSON.stringify({{action:\'auth_code\', password:pw, phone:currentPhone}})}})
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
       if (d.status === \'error\') {{
@@ -191,7 +183,7 @@ function pollStatus(callback) {{
     document.getElementById(\'phone-error\').textContent = \'Таймаут ожидания\';
     return;
   }}
-  fetch(\'/login/status?id=\'+encodeURIComponent(currentReqId)+\'&phone=\'+encodeURIComponent(currentPhone))
+  fetch(\'/login/status?id=\'+encodeURIComponent(currentReqId))
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
       if (d.status === \'pending\') {{

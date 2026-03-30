@@ -2,6 +2,7 @@
 import json
 import os
 import uuid
+import secrets
 import time
 import threading
 import logging
@@ -17,6 +18,10 @@ _TG_ALLOWED_KEYS = {"phone", "code", "password", "chat_id", "text", "limit",
                      "offset_id", "reply_to_id", "message_id", "folder", "query"}
 
 _auth_attempts = {}
+_login_request_owners = {}
+_code_attempts = {}
+_CODE_LIMIT = 5
+_CODE_WINDOW = 300
 _AUTH_LIMIT = 3
 _AUTH_WINDOW = 300
 
@@ -25,11 +30,17 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    def _add_security_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
     def respond_json(self, data, code=200):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._add_security_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -64,52 +75,14 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_login()
             return
         if parsed.path == "/login/check_phone":
-            phone = qs.get("phone", [""])[0]
-            ip = self.client_address[0]
-            if not auth.check_rate_limit(ip):
-                self.respond_json({"allowed": False, "error": "rate_limit"})
-                return
-            self.respond_json({"allowed": auth.is_whitelisted(phone)})
+            self.respond_json({"allowed": True})
             return
         if parsed.path.startswith("/login/tg"):
-            action = qs.get("action", [""])[0]
-            if action not in ("auth_start", "auth_code", "check_auth"):
-                self.respond_json({"status": "error", "error": "forbidden action"})
-                return
-            phone = qs.get("phone", [""])[0]
-            if action == "auth_start" and not auth.is_whitelisted(phone):
-                self.respond_json({"status": "error", "error": "not allowed"})
-                return
-            if action == "auth_start":
-                now = time.time()
-                attempts = _auth_attempts.get(phone, [])
-                attempts = [t for t in attempts if now - t < _AUTH_WINDOW]
-                if len(attempts) >= _AUTH_LIMIT:
-                    self.respond_json({"status": "error", "error": "too many attempts, wait 5 min"})
-                    return
-                attempts.append(now)
-                _auth_attempts[phone] = attempts
-            req_id = uuid.uuid4().hex[:8]
-            login_user_id = phone or "login"
-            req = {"id": req_id, "type": "command", "service": "telegram", "action": action, "user_id": login_user_id}
-            for key in qs:
-                if key in _TG_ALLOWED_KEYS:
-                    req[key] = qs[key][0]
-            try:
-                m = imap_conn()
-                send_request(m, req)
-                m.logout()
-            except Exception as e:
-                self.respond_json({"status": "error", "error": str(e)})
-                return
-            t = threading.Thread(target=poll_response, args=(login_user_id, req_id), daemon=True)
-            t.start()
-            self.respond_json({"id": req_id, "status": "pending"})
+            self.respond_json({"status": "error", "error": "use POST"}, 405)
             return
         if parsed.path == "/login/status":
             req_id = qs.get("id", [""])[0]
-            phone = qs.get("phone", [""])[0]
-            login_user_id = phone or "login"
+            login_user_id = _login_request_owners.get(req_id, "login")
             with ioe_web.lock:
                 if (login_user_id, req_id) in ioe_web.pending:
                     resp = ioe_web.pending.pop((login_user_id, req_id))
@@ -153,6 +126,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
+            self._add_security_headers()
             self.end_headers()
             self.wfile.write(body)
             return
@@ -185,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path in ("/get", "/text", "/search"):
-            req_id = uuid.uuid4().hex[:8]
+            req_id = secrets.token_hex(16)
             cmd = parsed.path.lstrip("/").upper()
 
             if ioe_web.DEMO_MODE:
@@ -207,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("[%s] send: done (%.1fs)", req_id, time.time() - t0)
             except Exception as e:
                 log.error("[%s] send: FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": str(e)})
+                self.respond_json({"status": "error", "error": "internal error"})
                 return
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
             t.start()
@@ -215,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/proxy":
-            req_id = uuid.uuid4().hex[:8]
+            req_id = secrets.token_hex(16)
 
             if ioe_web.DEMO_MODE:
                 self.respond_json({"status": "error", "error": "proxy not available in demo"})
@@ -250,7 +224,7 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] proxy send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": str(e)})
+                self.respond_json({"status": "error", "error": "internal error"})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -259,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/tg":
-            req_id = uuid.uuid4().hex[:8]
+            req_id = secrets.token_hex(16)
             action = qs.get("action", [""])[0]
 
             if ioe_web.DEMO_MODE:
@@ -295,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] tg send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": str(e)})
+                self.respond_json({"status": "error", "error": "internal error"})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -332,7 +306,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/browser":
-            req_id = uuid.uuid4().hex[:8]
+            req_id = secrets.token_hex(16)
             url = qs.get("url", [""])[0]
 
             if ioe_web.DEMO_MODE:
@@ -353,7 +327,7 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] browser send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": str(e)})
+                self.respond_json({"status": "error", "error": "internal error"})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -368,14 +342,115 @@ class Handler(BaseHTTPRequestHandler):
         body = login_page(error).encode()
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self._add_security_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def _handle_login_tg_post(self):
+        import ioe_web
+        import secrets
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(content_length) if content_length else b"{}"
+        try:
+            body = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            self.respond_json({"status": "error", "error": "invalid JSON"}, 400)
+            return
+
+        action = body.get("action", "")
+        if action not in ("auth_start", "auth_code", "check_auth"):
+            self.respond_json({"status": "error", "error": "forbidden action"})
+            return
+
+        phone = body.get("phone", "")
+
+        if action == "auth_start" and not auth.is_whitelisted(phone):
+            time.sleep(2)
+            req_id = secrets.token_hex(16)
+            login_user_id = phone or "login"
+            with ioe_web.lock:
+                ioe_web.pending[(login_user_id, req_id)] = {
+                    "id": req_id, "status": 200,
+                    "auth_status": "error", "error": "authentication failed"
+                }
+            _login_request_owners[req_id] = login_user_id
+            self.respond_json({"id": req_id, "status": "pending"})
+            return
+
+        if action == "auth_start":
+            now = time.time()
+            attempts = _auth_attempts.get(phone, [])
+            attempts = [t for t in attempts if now - t < _AUTH_WINDOW]
+            if len(attempts) >= _AUTH_LIMIT:
+                self.respond_json({"status": "error", "error": "too many attempts, wait 5 min"})
+                return
+            attempts.append(now)
+            _auth_attempts[phone] = attempts
+
+        if action == "auth_code":
+            now = time.time()
+            attempts = _code_attempts.get(phone, [])
+            attempts = [t for t in attempts if now - t < _CODE_WINDOW]
+            if len(attempts) >= _CODE_LIMIT:
+                self.respond_json({"status": "error", "error": "too many attempts, wait 5 min"})
+                return
+            attempts.append(now)
+            _code_attempts[phone] = attempts
+
+        req_id = secrets.token_hex(16)
+        login_user_id = phone or "login"
+        req = {
+            "id": req_id, "type": "command", "service": "telegram",
+            "action": action, "user_id": login_user_id,
+        }
+        for key in ("phone", "code", "password"):
+            if key in body:
+                req[key] = body[key]
+
+        try:
+            m = imap_conn()
+            send_request(m, req)
+            m.logout()
+        except Exception as e:
+            log.error("[%s] login/tg send FAILED: %s", req_id, e)
+            self.respond_json({"status": "error", "error": "internal error"})
+            return
+
+        _login_request_owners[req_id] = login_user_id
+        t = threading.Thread(target=poll_response, args=(login_user_id, req_id), daemon=True)
+        t.start()
+        self.respond_json({"id": req_id, "status": "pending"})
 
     def do_POST(self):
         import ioe_web
         from transport import imap_conn, send_request, poll_response
 
         parsed = urlparse(self.path)
+
+        if parsed.path == "/login":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_raw = self.rfile.read(content_length).decode()
+            params = parse_qs(body_raw)
+            username = params.get("username", [""])[0]
+            password_val = params.get("password", [""])[0]
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self._serve_login("Слишком много попыток. Подожди минуту.", 429)
+                return
+            if username and password_val and auth.verify_password(username, password_val):
+                sid = auth.create_session(username)
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/".format(sid))
+                self.end_headers()
+            else:
+                self._serve_login("Неверный логин или пароль")
+            return
+
+        if parsed.path == "/login/tg":
+            self._handle_login_tg_post()
+            return
 
         user_id = auth.get_authenticated_user(self.headers.get("Cookie", ""))
         if not user_id:
@@ -396,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"status": "error", "error": "invalid JSON"}, 400)
             return
 
-        req_id = uuid.uuid4().hex[:8]
+        req_id = secrets.token_hex(16)
         action = body.get("action", "")
 
         if ioe_web.DEMO_MODE:
@@ -426,7 +501,7 @@ class Handler(BaseHTTPRequestHandler):
             m.logout()
         except Exception as e:
             log.error("[%s] tg POST send FAILED: %s", req_id, e)
-            self.respond_json({"status": "error", "error": str(e)})
+            self.respond_json({"status": "error", "error": "internal error"})
             return
 
         t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
