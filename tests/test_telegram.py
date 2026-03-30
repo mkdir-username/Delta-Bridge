@@ -18,10 +18,29 @@ for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "req
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
 
+sys.modules["telethon"].TelegramClient = MagicMock()
+sys.modules["telethon.tl.functions.messages"].GetDialogsRequest = MagicMock()
+sys.modules["telethon.tl.functions.messages"].ReadHistoryRequest = MagicMock()
+
 _mock_events = types.ModuleType("telethon.events")
 _mock_events.NewMessage = MagicMock()
 sys.modules["telethon.events"] = _mock_events
 sys.modules["telethon"].events = _mock_events
+
+class _RPCError(Exception):
+    def __init__(self, *a, **kw):
+        self.seconds = kw.get("seconds", 0)
+        super().__init__(str(kw))
+
+_mock_errors = types.ModuleType("telethon.errors")
+_mock_errors.AuthKeyUnregisteredError = type("AuthKeyUnregisteredError", (_RPCError,), {})
+_mock_errors.SessionPasswordNeededError = type("SessionPasswordNeededError", (_RPCError,), {})
+_mock_errors.PhoneCodeInvalidError = type("PhoneCodeInvalidError", (_RPCError,), {})
+_mock_errors.FloodWaitError = type("FloodWaitError", (_RPCError,), {"__init__": lambda self, *a, **kw: (_RPCError.__init__(self, *a, **kw), setattr(self, "seconds", kw.get("seconds", 0)))[0]})
+sys.modules["telethon.errors"] = _mock_errors
+if "telegram_adapter" in sys.modules:
+    import importlib
+    importlib.reload(sys.modules["telegram_adapter"])
 sys.modules["truststore"].inject_into_ssl = lambda: None
 sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 
@@ -398,3 +417,82 @@ class TestTelegramListener:
         assert notification["type"] == "notification"
         assert notification["service"] == "telegram"
         assert len(notification["text"]) <= 200
+
+
+class TestTelegramAuth:
+    def _make_adapter(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {"default": MagicMock()}
+        adapter.client = None
+        adapter.api_id = 0
+        adapter.api_hash = ""
+        adapter.loop = MagicMock()
+        adapter._auth_state = {}
+        return adapter
+
+    def test_check_auth_returns_authorized_true(self):
+        adapter = self._make_adapter()
+        adapter._run_sync = MagicMock(return_value=True)
+        result = adapter.handle("check_auth", {})
+        assert result["status"] == 200
+        assert result["authorized"] is True
+
+    def test_check_auth_returns_authorized_false(self):
+        adapter = self._make_adapter()
+        adapter._run_sync = MagicMock(return_value=False)
+        result = adapter.handle("check_auth", {})
+        assert result["status"] == 200
+        assert result["authorized"] is False
+
+    def test_check_auth_with_user_id(self):
+        adapter = self._make_adapter()
+        adapter.clients["denis"] = MagicMock()
+        adapter._run_sync = MagicMock(return_value=True)
+        result = adapter.handle("check_auth", {"user_id": "denis"})
+        assert result["status"] == 200
+        assert result["authorized"] is True
+
+    def test_handle_auth_key_unregistered_returns_401(self):
+        from telethon.errors import AuthKeyUnregisteredError
+        adapter = self._make_adapter()
+        adapter._run_sync = MagicMock(side_effect=AuthKeyUnregisteredError())
+        result = adapter.handle("get_dialogs", {})
+        assert result["status"] == 401
+        assert result["auth_required"] is True
+        assert "default" not in adapter.clients
+
+    def test_auth_start_flood_wait(self):
+        from telethon.errors import FloodWaitError
+        adapter = self._make_adapter()
+        adapter._run_sync = MagicMock(side_effect=FloodWaitError(seconds=120))
+        result = adapter.handle("auth_start", {"phone": "+71234567890"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "flood_wait"
+        assert result["seconds"] == 120
+
+    def test_auth_code_invalid_code(self):
+        from telethon.errors import PhoneCodeInvalidError
+        adapter = self._make_adapter()
+        adapter._auth_state = {"default": {"phone": "+7", "hash": "abc"}}
+        adapter._run_sync = MagicMock(side_effect=PhoneCodeInvalidError())
+        result = adapter.handle("auth_code", {"code": "99999"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "invalid_code"
+
+    def test_auth_code_2fa_required(self):
+        from telethon.errors import SessionPasswordNeededError
+        adapter = self._make_adapter()
+        adapter._auth_state = {"default": {"phone": "+7", "hash": "abc"}}
+        adapter._run_sync = MagicMock(side_effect=SessionPasswordNeededError())
+        result = adapter.handle("auth_code", {"code": "12345"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "2fa_required"
+
+    def test_auth_code_success(self):
+        adapter = self._make_adapter()
+        adapter._auth_state = {"default": {"phone": "+7", "hash": "abc"}}
+        adapter._run_sync = MagicMock(return_value=None)
+        result = adapter.handle("auth_code", {"code": "12345"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "authorized"
