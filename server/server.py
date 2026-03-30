@@ -62,6 +62,9 @@ RATE_LIMIT = 10
 RATE_WINDOW = 60
 _rate_timestamps = []
 
+_sessions = {}
+SESSION_TTL = 3600
+
 
 def validate_url(url):
     parsed = urlparse(url)
@@ -316,6 +319,92 @@ def extract_attachment(raw):
     return None
 
 
+def _cleanup_sessions():
+    now = time.time()
+    expired = [k for k, v in _sessions.items() if now - v["created"] > SESSION_TTL]
+    for k in expired:
+        _sessions[k]["session"].close()
+        del _sessions[k]
+
+
+def handle_http_proxy(request):
+    method = request.get("method", "GET").upper()
+    url = request.get("url", "")
+    headers = request.get("headers", {})
+    cookies = request.get("cookies", None)
+    body = request.get("body", None)
+    content_type = request.get("content_type", "json")
+    session_id = request.get("session_id")
+
+    try:
+        validate_url(url)
+        check_rate_limit()
+    except ValueError as e:
+        return {"type": "http_response", "status_code": 403, "error": str(e)}
+
+    try:
+        _cleanup_sessions()
+
+        req_headers = {**{"User-Agent": UA}, **headers}
+        kwargs = {"headers": req_headers, "cookies": cookies, "timeout": FETCH_TIMEOUT}
+
+        if body and method in ("POST", "PUT", "PATCH"):
+            if content_type == "form":
+                kwargs["data"] = body
+            else:
+                kwargs["json"] = body
+
+        if session_id and session_id in _sessions:
+            requester = _sessions[session_id]["session"]
+        else:
+            requester = requests
+
+        resp = requester.request(method, url, **kwargs)
+
+        result = {
+            "type": "http_response",
+            "status_code": resp.status_code,
+            "headers": dict(resp.headers),
+            "body": resp.text[:MAX_BODY],
+            "url": str(resp.url),
+        }
+
+        ct = resp.headers.get("Content-Type", "")
+        if "text/html" in ct and request.get("extract", True):
+            try:
+                extracted = smart_extract(url)
+                result["extracted"] = extracted
+                result["page_type"] = extracted.get("type", "page")
+            except Exception:
+                pass
+
+        return result
+    except Exception as e:
+        return {"type": "http_response", "status_code": 502, "error": str(e)}
+
+
+def dispatch_request(request):
+    req_type = request.get("type")
+    if req_type is None:
+        return None
+    if req_type == "http":
+        return handle_http_proxy(request)
+    if req_type == "command":
+        return {"status": 501, "error": "commands not implemented yet"}
+    if req_type == "session_start":
+        sid = request.get("session_id", uuid.uuid4().hex)
+        _sessions[sid] = {"session": requests.Session(), "created": time.time()}
+        return {"status": 200, "session_id": sid}
+    if req_type == "session_end":
+        sid = request.get("session_id", "")
+        if sid in _sessions:
+            _sessions[sid]["session"].close()
+            del _sessions[sid]
+            return {"status": 200, "session_id": sid}
+        return {"status": 404, "error": f"session {sid} not found"}
+    return {"status": 400, "error": f"unknown type: {req_type}"}
+
+
 def process_message(client, uid, raw):
     payload = extract_attachment(raw)
     if payload is None:
@@ -328,6 +417,13 @@ def process_message(client, uid, raw):
     except Exception:
         log.warning("uid=%s: decrypt failed, skipping", uid)
         return False
+
+    dispatch_result = dispatch_request(request)
+    if dispatch_result is not None:
+        req_id = request.get("id", "")
+        append_response(client, {"id": req_id, **dispatch_result})
+        log.info("Done uid=%s (type=%s)", uid, request.get("type"))
+        return True
 
     cmd = request.get("cmd", "GET").upper()
     req_id = request.get("id", "")

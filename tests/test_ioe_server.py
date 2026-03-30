@@ -3,6 +3,8 @@ import json
 import sys
 import os
 import types
+_root = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(_root, "server"))
 sys.path.insert(0, os.path.dirname(__file__))
 
 for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests", "trafilatura"]:
@@ -45,6 +47,9 @@ sys.modules["PIL"].open = lambda *a: None
 os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "pass")
 os.environ.setdefault("IOE_SECRET", "secret123")
+
+import server as _server_mod
+sys.modules["ioe_server"] = _server_mod
 
 
 def test_do_search_returns_list_of_dicts():

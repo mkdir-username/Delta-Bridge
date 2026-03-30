@@ -8,6 +8,8 @@ from unittest.mock import patch, MagicMock
 from http.server import HTTPServer
 import socket
 
+_root = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(_root, "webui"))
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "pass")
@@ -269,6 +271,40 @@ class TestStatusEndpoint:
             assert False, "expected 404"
         except UrlHTTPError as e:
             assert e.code == 404
+        server.server_close()
+
+
+class TestProxyEndpoint:
+    def test_proxy_returns_pending(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with patch.object(ioe_web, 'imap_conn') as mock:
+            mock.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            resp = urlopen("http://127.0.0.1:{}/proxy?method=GET&url=https://example.com".format(port), timeout=5)
+            data = json.loads(resp.read().decode())
+            assert data["status"] == "pending"
+            assert "id" in data
+        server.server_close()
+
+    def test_proxy_sends_type_http(self):
+        import ioe_web
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        sent_data = {}
+        def capture_send(m, req):
+            sent_data.update(req)
+        with patch.object(ioe_web, 'imap_conn') as mock_conn, \
+             patch.object(ioe_web, 'send_request', side_effect=capture_send):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            urlopen("http://127.0.0.1:{}/proxy?method=POST&url=https://api.test.com&extract=false".format(port), timeout=5)
+        assert sent_data.get("type") == "http"
+        assert sent_data.get("method") == "POST"
+        assert sent_data.get("extract") == False
         server.server_close()
 
 

@@ -1084,6 +1084,49 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"id": req_id, "status": "pending"})
             return
 
+        if parsed.path == "/proxy":
+            req_id = uuid.uuid4().hex[:8]
+
+            if DEMO_MODE:
+                self.respond_json({"status": "error", "error": "proxy not available in demo"})
+                return
+
+            method = qs.get("method", ["GET"])[0].upper()
+            url = qs.get("url", [""])[0]
+            body_str = qs.get("body", [""])[0]
+            session_id = qs.get("session_id", [""])[0]
+            extract = qs.get("extract", ["true"])[0] != "false"
+
+            req = {
+                "id": req_id,
+                "type": "http",
+                "method": method,
+                "url": url,
+                "extract": extract,
+            }
+            if body_str:
+                try:
+                    req["body"] = json.loads(body_str)
+                except (json.JSONDecodeError, ValueError):
+                    req["body"] = body_str
+            if session_id:
+                req["session_id"] = session_id
+
+            try:
+                log.info("[%s] proxy: %s %s", req_id, method, url)
+                m = imap_conn()
+                send_request(m, req)
+                m.logout()
+            except Exception as e:
+                log.error("[%s] proxy send FAILED: %s", req_id, e)
+                self.respond_json({"status": "error", "error": str(e)})
+                return
+
+            t = threading.Thread(target=poll_response, args=(req_id,), daemon=True)
+            t.start()
+            self.respond_json({"id": req_id, "status": "pending"})
+            return
+
         self.send_error(404)
 
 
