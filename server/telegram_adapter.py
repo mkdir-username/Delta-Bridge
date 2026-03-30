@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import threading
+import time
 from datetime import datetime
 
 log = logging.getLogger("ioe.telegram")
@@ -22,19 +23,19 @@ class TelegramAdapter:
         self.api_id = api_id or int(os.environ.get("TG_API_ID", "0"))
         self.api_hash = api_hash or os.environ.get("TG_API_HASH", "")
         self.session_path = session_path or os.environ.get("TG_SESSION", "ioe_telegram")
+        self.clients = {}
         self.client = None
         self.loop = None
         self._thread = None
+        self._auth_state = {}
+        self._last_notify = {}
+        self._notify_interval = 10
 
     def start(self):
         self.loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        self.client = TelegramClient(
-            self.session_path, self.api_id, self.api_hash, loop=self.loop
-        )
-        self._run_sync(self.client.connect())
-        log.info("Telegram client connected, authorized=%s", self.is_authorized())
+        log.info("Telegram event loop started")
 
     def _run_loop(self):
         asyncio.set_event_loop(self.loop)
@@ -44,10 +45,19 @@ class TelegramAdapter:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result(timeout=30)
 
-    def is_authorized(self):
-        if not self.client:
+    def _get_client(self, user_id):
+        if user_id not in self.clients:
+            session_path = "ioe_telegram_{}".format(user_id)
+            client = TelegramClient(session_path, self.api_id, self.api_hash, loop=self.loop)
+            self._run_sync(client.connect())
+            self.clients[user_id] = client
+        return self.clients[user_id]
+
+    def is_authorized(self, user_id="default"):
+        if user_id not in self.clients:
             return False
-        return self._run_sync(self.client.is_user_authorized())
+        client = self.clients[user_id]
+        return self._run_sync(client.is_user_authorized())
 
     def handle(self, action, params):
         actions = {
@@ -66,17 +76,53 @@ class TelegramAdapter:
         if not handler:
             return {"status": 400, "error": f"unknown telegram action: {action}"}
         try:
-            result = handler(params)
+            user_id = params.get("user_id", "default")
+            client = self._get_client(user_id)
+            result = handler(client, params)
             return {"status": 200, **result}
         except Exception as e:
             log.error("Telegram action %s failed: %s", action, e)
             return {"status": 500, "error": str(e)}
 
-    def _get_dialogs(self, params):
+    def start_listener(self, user_id, notify_callback):
+        client = self._get_client(user_id)
+        if not self._run_sync(client.is_user_authorized()):
+            return
+
+        def _rate_limited_callback(notification):
+            now = time.time()
+            uid = notification.get("user_id", "default")
+            if now - self._last_notify.get(uid, 0) < self._notify_interval:
+                return
+            self._last_notify[uid] = now
+            notify_callback(notification)
+
+        async def _on_new_message(event):
+            sender = await event.get_sender()
+            sender_name = getattr(sender, 'first_name', '') or str(getattr(sender, 'id', ''))
+            chat = await event.get_chat()
+            chat_name = getattr(chat, 'title', '') or getattr(chat, 'first_name', '') or str(chat.id)
+            notification = {
+                "type": "notification",
+                "service": "telegram",
+                "user_id": user_id,
+                "chat_id": chat.id,
+                "sender": sender_name,
+                "chat_name": chat_name,
+                "text": (event.text or "")[:200],
+                "timestamp": event.date.isoformat() if event.date else "",
+            }
+            _rate_limited_callback(notification)
+
+        from telethon import events
+        client.add_event_handler(_on_new_message, events.NewMessage(incoming=True))
+        log.info("Telegram listener started for user_id=%s", user_id)
+
+    def _get_dialogs(self, client, params):
         limit = params.get("limit", 20)
 
         async def _fetch():
-            dialogs = await self.client.get_dialogs(limit=limit)
+            dialogs = await client.get_dialogs(limit=limit)
             result = []
             for d in dialogs:
                 entity = d.entity
@@ -102,11 +148,11 @@ class TelegramAdapter:
         dialogs = self._run_sync(_fetch())
         return {"dialogs": dialogs}
 
-    def _get_unread(self, params):
+    def _get_unread(self, client, params):
         limit = params.get("limit", 50)
 
         async def _fetch():
-            dialogs = await self.client.get_dialogs(limit=limit)
+            dialogs = await client.get_dialogs(limit=limit)
             return [
                 {"id": d.id, "name": d.name or "", "unread": d.unread_count}
                 for d in dialogs if d.unread_count > 0
@@ -115,12 +161,12 @@ class TelegramAdapter:
         unread = self._run_sync(_fetch())
         return {"unread_chats": unread}
 
-    def _get_messages(self, params):
+    def _get_messages(self, client, params):
         chat_id = params.get("chat_id")
         limit = params.get("limit", 20)
 
         async def _fetch():
-            messages = await self.client.get_messages(chat_id, limit=limit)
+            messages = await client.get_messages(chat_id, limit=limit)
             result = []
             for m in messages:
                 msg = {
@@ -140,57 +186,57 @@ class TelegramAdapter:
         messages = self._run_sync(_fetch())
         return {"messages": messages}
 
-    def _send_message(self, params):
+    def _send_message(self, client, params):
         chat_id = params.get("chat_id")
         text = params.get("text", "")
 
         async def _send():
-            msg = await self.client.send_message(chat_id, text)
+            msg = await client.send_message(chat_id, text)
             return msg.id
 
         msg_id = self._run_sync(_send())
         return {"message_id": msg_id}
 
-    def _reply(self, params):
+    def _reply(self, client, params):
         chat_id = params.get("chat_id")
         reply_to = params.get("reply_to_id")
         text = params.get("text", "")
 
         async def _send():
-            msg = await self.client.send_message(chat_id, text, reply_to=reply_to)
+            msg = await client.send_message(chat_id, text, reply_to=reply_to)
             return msg.id
 
         msg_id = self._run_sync(_send())
         return {"message_id": msg_id}
 
-    def _mark_read(self, params):
+    def _mark_read(self, client, params):
         chat_id = params.get("chat_id")
 
         async def _mark():
-            await self.client.send_read_acknowledge(chat_id)
+            await client.send_read_acknowledge(chat_id)
 
         self._run_sync(_mark())
         return {}
 
-    def _edit_message(self, params):
+    def _edit_message(self, client, params):
         chat_id = params.get("chat_id")
         message_id = params.get("message_id")
         text = params.get("text", "")
 
         async def _edit():
-            msg = await self.client.edit_message(chat_id, message_id, text)
+            msg = await client.edit_message(chat_id, message_id, text)
             return msg.id
 
         msg_id = self._run_sync(_edit())
         return {"message_id": msg_id}
 
-    def _search(self, params):
+    def _search(self, client, params):
         chat_id = params.get("chat_id")
         query = params.get("query", "")
         limit = params.get("limit", 10)
 
         async def _do_search():
-            messages = await self.client.get_messages(chat_id, search=query, limit=limit)
+            messages = await client.get_messages(chat_id, search=query, limit=limit)
             return [
                 {"id": m.id, "text": m.text or "", "date": m.date.isoformat() if m.date else ""}
                 for m in messages
@@ -199,30 +245,32 @@ class TelegramAdapter:
         results = self._run_sync(_do_search())
         return {"results": results}
 
-    def _auth_start(self, params):
+    def _auth_start(self, client, params):
         phone = params.get("phone", "")
+        user_id = params.get("user_id", "default")
 
         async def _start():
-            result = await self.client.send_code_request(phone)
+            result = await client.send_code_request(phone)
             return result
 
         sent = self._run_sync(_start())
-        self._phone_code_hash = sent.phone_code_hash
-        self._auth_phone = phone
+        self._auth_state[user_id] = {"phone": phone, "hash": sent.phone_code_hash}
         return {"auth_status": "code_required"}
 
-    def _auth_code(self, params):
+    def _auth_code(self, client, params):
         code = params.get("code", "")
         password = params.get("password")
-        phone = getattr(self, "_auth_phone", params.get("phone", ""))
-        phone_code_hash = getattr(self, "_phone_code_hash", "")
+        user_id = params.get("user_id", "default")
+        state = self._auth_state.get(user_id, {})
+        phone = state.get("phone", params.get("phone", ""))
+        phone_code_hash = state.get("hash", "")
 
         async def _complete():
             try:
-                await self.client.sign_in(phone, code, phone_code_hash=phone_code_hash)
+                await client.sign_in(phone, code, phone_code_hash=phone_code_hash)
             except Exception:
                 if password:
-                    await self.client.sign_in(password=password)
+                    await client.sign_in(password=password)
                 else:
                     raise
 

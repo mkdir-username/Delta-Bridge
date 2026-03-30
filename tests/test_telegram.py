@@ -14,9 +14,14 @@ os.environ.setdefault("IOE_SECRET", "secret123")
 
 from unittest.mock import patch, MagicMock, AsyncMock
 
-for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests", "trafilatura", "telethon"]:
+for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests", "trafilatura", "telethon", "telethon.tl", "telethon.tl.functions", "telethon.tl.functions.messages"]:
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
+
+_mock_events = types.ModuleType("telethon.events")
+_mock_events.NewMessage = MagicMock()
+sys.modules["telethon.events"] = _mock_events
+sys.modules["telethon"].events = _mock_events
 sys.modules["truststore"].inject_into_ssl = lambda: None
 sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 
@@ -140,11 +145,19 @@ class TestDispatchTelegram:
 
 
 class TestTelegramAdapter:
-    def test_handle_dispatches_action(self):
+    def _make_adapter(self):
         from telegram_adapter import TelegramAdapter
         adapter = TelegramAdapter.__new__(TelegramAdapter)
-        adapter.client = MagicMock()
+        adapter.clients = {"default": MagicMock()}
+        adapter.client = None
+        adapter.api_id = 0
+        adapter.api_hash = ""
         adapter.loop = MagicMock()
+        adapter._auth_state = {}
+        return adapter
+
+    def test_handle_dispatches_action(self):
+        adapter = self._make_adapter()
         adapter._run_sync = MagicMock(return_value=[
             {"id": 1, "name": "Chat", "unread": 0}
         ])
@@ -152,30 +165,236 @@ class TestTelegramAdapter:
         assert result["status"] == 200
 
     def test_handle_unknown_action(self):
-        from telegram_adapter import TelegramAdapter
-        adapter = TelegramAdapter.__new__(TelegramAdapter)
-        adapter.client = MagicMock()
-        adapter.loop = MagicMock()
+        adapter = self._make_adapter()
         result = adapter.handle("nonexistent_action", {})
         assert result["status"] == 400
         assert "error" in result
 
     def test_handle_send_message(self):
-        from telegram_adapter import TelegramAdapter
-        adapter = TelegramAdapter.__new__(TelegramAdapter)
-        adapter.client = MagicMock()
-        adapter.loop = MagicMock()
+        adapter = self._make_adapter()
         adapter._run_sync = MagicMock(return_value=42)
         result = adapter.handle("send_message", {"chat_id": 1, "text": "hi"})
         assert result["status"] == 200
         assert result["message_id"] == 42
 
     def test_handle_reply(self):
-        from telegram_adapter import TelegramAdapter
-        adapter = TelegramAdapter.__new__(TelegramAdapter)
-        adapter.client = MagicMock()
-        adapter.loop = MagicMock()
+        adapter = self._make_adapter()
         adapter._run_sync = MagicMock(return_value=43)
         result = adapter.handle("reply", {"chat_id": 1, "reply_to_id": 10, "text": "reply"})
         assert result["status"] == 200
         assert result["message_id"] == 43
+
+
+class TestMultiUserTelegram:
+    def test_clients_dict_initialized(self):
+        from telegram_adapter import TelegramAdapter
+        with patch("telegram_adapter.TELETHON_AVAILABLE", True):
+            adapter = TelegramAdapter(api_id=123, api_hash="abc")
+        assert hasattr(adapter, "clients")
+        assert isinstance(adapter.clients, dict)
+        assert adapter.clients == {}
+
+    def test_auth_state_initialized(self):
+        from telegram_adapter import TelegramAdapter
+        with patch("telegram_adapter.TELETHON_AVAILABLE", True):
+            adapter = TelegramAdapter(api_id=123, api_hash="abc")
+        assert hasattr(adapter, "_auth_state")
+        assert isinstance(adapter._auth_state, dict)
+
+    def test_get_client_creates_per_user(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {}
+        adapter.api_id = 123
+        adapter.api_hash = "abc"
+        adapter.loop = asyncio.new_event_loop()
+        mock_client = MagicMock()
+        with patch("telegram_adapter.TelegramClient", return_value=mock_client, create=True):
+            future_mock = MagicMock()
+            future_mock.result.return_value = None
+            with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
+                client = adapter._get_client("user_a")
+                assert "user_a" in adapter.clients
+                assert adapter.clients["user_a"] is mock_client
+                client_b = adapter._get_client("user_b")
+                assert "user_b" in adapter.clients
+                assert len(adapter.clients) == 2
+        adapter.loop.close()
+
+    def test_get_client_reuses_existing(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {}
+        adapter.api_id = 123
+        adapter.api_hash = "abc"
+        adapter.loop = asyncio.new_event_loop()
+        mock_client = MagicMock()
+        with patch("telegram_adapter.TelegramClient", return_value=mock_client, create=True) as ctor:
+            future_mock = MagicMock()
+            future_mock.result.return_value = None
+            with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
+                adapter._get_client("user_a")
+                adapter._get_client("user_a")
+                assert ctor.call_count == 1
+        adapter.loop.close()
+
+    def test_handle_extracts_user_id(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {}
+        adapter.api_id = 123
+        adapter.api_hash = "abc"
+        adapter.loop = asyncio.new_event_loop()
+        adapter._auth_state = {}
+        mock_client = MagicMock()
+        with patch("telegram_adapter.TelegramClient", return_value=mock_client, create=True):
+            future_mock = MagicMock()
+            future_mock.result.return_value = [MagicMock(
+                id=1, name="Chat", unread_count=0, message=None,
+                date=None, entity=MagicMock(spec=[]),
+                archived=False, pinned=False,
+            )]
+            with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
+                result = adapter.handle("get_dialogs", {"user_id": "test_user"})
+                assert "test_user" in adapter.clients
+                assert result["status"] == 200
+        adapter.loop.close()
+
+    def test_handle_defaults_user_id(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {}
+        adapter.api_id = 123
+        adapter.api_hash = "abc"
+        adapter.loop = asyncio.new_event_loop()
+        adapter._auth_state = {}
+        mock_client = MagicMock()
+        with patch("telegram_adapter.TelegramClient", return_value=mock_client, create=True):
+            future_mock = MagicMock()
+            future_mock.result.return_value = []
+            with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
+                adapter.handle("get_dialogs", {})
+                assert "default" in adapter.clients
+        adapter.loop.close()
+
+    def test_auth_state_per_user(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter._auth_state = {}
+        adapter._auth_state["denis"] = {"phone": "+7123", "hash": "abc"}
+        adapter._auth_state["kamila"] = {"phone": "+7456", "hash": "def"}
+        assert adapter._auth_state["denis"]["phone"] == "+7123"
+        assert adapter._auth_state["kamila"]["phone"] == "+7456"
+
+    def test_is_authorized_per_user(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {"alice": MagicMock()}
+        adapter.api_id = 0
+        adapter.api_hash = ""
+        adapter.loop = asyncio.new_event_loop()
+        future_mock = MagicMock()
+        future_mock.result.return_value = True
+        with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
+            assert adapter.is_authorized("alice") is True
+            assert adapter.is_authorized("nobody") is False
+        adapter.loop.close()
+
+    def test_listener_init_fields(self):
+        from telegram_adapter import TelegramAdapter
+        with patch("telegram_adapter.TELETHON_AVAILABLE", True):
+            adapter = TelegramAdapter(api_id=123, api_hash="abc")
+        assert hasattr(adapter, "_last_notify")
+        assert isinstance(adapter._last_notify, dict)
+        assert hasattr(adapter, "_notify_interval")
+        assert adapter._notify_interval == 10
+
+    def test_backward_compat_single_client(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {"default": MagicMock()}
+        adapter.client = None
+        adapter.api_id = 0
+        adapter.api_hash = ""
+        adapter.loop = MagicMock()
+        adapter._auth_state = {}
+        adapter._run_sync = MagicMock(return_value=[])
+        result = adapter.handle("get_dialogs", {})
+        assert result["status"] == 200
+
+
+class TestTelegramListener:
+    def _make_adapter(self):
+        from telegram_adapter import TelegramAdapter
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {}
+        adapter.loop = asyncio.new_event_loop()
+        adapter._auth_state = {}
+        adapter._last_notify = {}
+        adapter._notify_interval = 10
+        adapter.api_id = 0
+        adapter.api_hash = ""
+        return adapter
+
+    def test_start_listener_unauthorized_skips(self):
+        adapter = self._make_adapter()
+        mock_client = MagicMock()
+        adapter.clients["test"] = mock_client
+        adapter._run_sync = MagicMock(return_value=False)
+        callback = MagicMock()
+        adapter.start_listener("test", callback)
+        mock_client.add_event_handler.assert_not_called()
+        adapter.loop.close()
+
+    def test_start_listener_authorized_adds_handler(self):
+        adapter = self._make_adapter()
+        mock_client = MagicMock()
+        adapter.clients["test"] = mock_client
+        adapter._run_sync = MagicMock(return_value=True)
+        callback = MagicMock()
+        adapter.start_listener("test", callback)
+        mock_client.add_event_handler.assert_called_once()
+        adapter.loop.close()
+
+    def test_start_listener_missing_client_creates_it(self):
+        adapter = self._make_adapter()
+        mock_client = MagicMock()
+        adapter._run_sync = MagicMock(return_value=True)
+        with patch("telegram_adapter.TelegramClient", return_value=mock_client, create=True):
+            future_mock = MagicMock()
+            future_mock.result.return_value = None
+            with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
+                adapter.start_listener("new_user", MagicMock())
+        mock_client.add_event_handler.assert_called_once()
+        adapter.loop.close()
+
+    def test_rate_limiting_blocks_rapid_calls(self):
+        import time
+        adapter = self._make_adapter()
+        adapter._last_notify["u1"] = time.time()
+        now = time.time()
+        assert now - adapter._last_notify["u1"] < adapter._notify_interval
+        adapter.loop.close()
+
+    def test_rate_limiting_allows_after_interval(self):
+        import time
+        adapter = self._make_adapter()
+        adapter._last_notify["u1"] = time.time() - 20
+        now = time.time()
+        assert now - adapter._last_notify["u1"] >= adapter._notify_interval
+        adapter.loop.close()
+
+    def test_notification_format(self):
+        notification = {
+            "type": "notification",
+            "service": "telegram",
+            "user_id": "test",
+            "chat_id": 123,
+            "sender": "Alice",
+            "chat_name": "Test Chat",
+            "text": "Hello",
+            "timestamp": "2026-03-30T10:00:00",
+        }
+        assert notification["type"] == "notification"
+        assert notification["service"] == "telegram"
+        assert len(notification["text"]) <= 200
