@@ -1,12 +1,11 @@
-"""Authentication: bcrypt passwords, httponly sessions, rate limiting."""
+"""Authentication: phone whitelist, httponly sessions, rate limiting."""
 import os
 import json
+import re
 import time
 import secrets
 import hmac
 import logging
-
-import bcrypt
 
 log = logging.getLogger("ioe.auth")
 
@@ -15,36 +14,36 @@ RATE_LIMIT = 5
 RATE_WINDOW = 60
 _CLEANUP_INTERVAL = 60
 
-_users = {}
-_users_path = ""
+_whitelist = {}
+_whitelist_path = ""
 _sessions = {}
 _rate = {}
 _last_cleanup = 0
 
 
-def load_users(path=None):
-    global _users, _users_path
+def load_whitelist(path=None):
+    global _whitelist, _whitelist_path
     if path is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "users.json")
-    _users_path = os.path.abspath(path)
-    if os.path.exists(_users_path):
-        with open(_users_path) as f:
-            _users = json.load(f)
-        log.info("Loaded %d users from %s", len(_users), _users_path)
+    _whitelist_path = os.path.abspath(path)
+    if os.path.exists(_whitelist_path):
+        with open(_whitelist_path) as f:
+            _whitelist = json.load(f)
+        log.info("Loaded %d phones from %s", len(_whitelist), _whitelist_path)
     else:
-        _users = {}
-        log.warning("No users.json at %s", _users_path)
+        _whitelist = {}
+        log.warning("No users.json at %s", _whitelist_path)
 
 
-_DUMMY_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt()).decode()
+def _normalize_phone(phone):
+    phone = re.sub(r"[\s\-()]", "", phone)
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    return phone
 
 
-def verify_password(username, password):
-    user = _users.get(username)
-    if not user:
-        bcrypt.checkpw(b"dummy", _DUMMY_HASH.encode())
-        return False
-    return bcrypt.checkpw(password.encode(), user["password_hash"].encode())
+def is_whitelisted(phone):
+    return _normalize_phone(phone) in _whitelist
 
 
 def create_session(user_id):
