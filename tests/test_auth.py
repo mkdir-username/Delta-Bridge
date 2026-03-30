@@ -7,24 +7,22 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "webui"))
 import auth
 
 
-def test_verify_correct_password():
-    import bcrypt
-    pw = "testpass123"
-    hashed = bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
-    auth._users = {"testuser": {"password_hash": hashed}}
-    assert auth.verify_password("testuser", pw) is True
+def test_whitelisted_phone():
+    auth._whitelist = {"+79274918222": {}, "+77479886313": {}}
+    assert auth.is_whitelisted("+79274918222") is True
+    assert auth.is_whitelisted("+79999999999") is False
 
 
-def test_verify_wrong_password():
-    import bcrypt
-    hashed = bcrypt.hashpw(b"correct", bcrypt.gensalt()).decode()
-    auth._users = {"testuser": {"password_hash": hashed}}
-    assert auth.verify_password("testuser", "wrong") is False
+def test_whitelist_normalization():
+    auth._whitelist = {"+79274918222": {}}
+    assert auth.is_whitelisted("79274918222") is True
+    assert auth.is_whitelisted("+7 927 491 8222") is True
+    assert auth.is_whitelisted("+7-927-491-8222") is True
 
 
-def test_verify_nonexistent_user():
-    auth._users = {}
-    assert auth.verify_password("ghost", "anything") is False
+def test_not_whitelisted():
+    auth._whitelist = {}
+    assert auth.is_whitelisted("+79999999999") is False
 
 
 def test_create_and_get_session():
