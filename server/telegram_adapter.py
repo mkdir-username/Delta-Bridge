@@ -11,6 +11,7 @@ log = logging.getLogger("ioe.telegram")
 try:
     from telethon import TelegramClient
     from telethon.tl.functions.messages import GetDialogsRequest, ReadHistoryRequest
+    from telethon.errors import AuthKeyUnregisteredError, SessionPasswordNeededError, PhoneCodeInvalidError, FloodWaitError
     TELETHON_AVAILABLE = True
 except ImportError:
     TELETHON_AVAILABLE = False
@@ -59,6 +60,10 @@ class TelegramAdapter:
         client = self.clients[user_id]
         return self._run_sync(client.is_user_authorized())
 
+    def _check_auth(self, client, params):
+        user_id = params.get("user_id", "default")
+        return {"authorized": self.is_authorized(user_id)}
+
     def handle(self, action, params):
         actions = {
             "get_dialogs": self._get_dialogs,
@@ -71,6 +76,7 @@ class TelegramAdapter:
             "search": self._search,
             "auth_start": self._auth_start,
             "auth_code": self._auth_code,
+            "check_auth": self._check_auth,
         }
         handler = actions.get(action)
         if not handler:
@@ -80,6 +86,10 @@ class TelegramAdapter:
             client = self._get_client(user_id)
             result = handler(client, params)
             return {"status": 200, **result}
+        except AuthKeyUnregisteredError:
+            log.warning("Session invalid for user %s, purging client", user_id)
+            self.clients.pop(user_id, None)
+            return {"status": 401, "auth_required": True, "error": "session expired, re-auth needed"}
         except Exception as e:
             log.error("Telegram action %s failed: %s", action, e)
             return {"status": 500, "error": str(e)}
@@ -253,7 +263,10 @@ class TelegramAdapter:
             result = await client.send_code_request(phone)
             return result
 
-        sent = self._run_sync(_start())
+        try:
+            sent = self._run_sync(_start())
+        except FloodWaitError as e:
+            return {"auth_status": "flood_wait", "seconds": e.seconds}
         self._auth_state[user_id] = {"phone": phone, "hash": sent.phone_code_hash}
         return {"auth_status": "code_required"}
 
@@ -266,13 +279,23 @@ class TelegramAdapter:
         phone_code_hash = state.get("hash", "")
 
         async def _complete():
+            if not code and password:
+                await client.sign_in(password=password)
+                return
             try:
                 await client.sign_in(phone, code, phone_code_hash=phone_code_hash)
-            except Exception:
+            except SessionPasswordNeededError:
                 if password:
                     await client.sign_in(password=password)
                 else:
                     raise
 
-        self._run_sync(_complete())
-        return {"auth_status": "authorized"}
+        try:
+            self._run_sync(_complete())
+            return {"auth_status": "authorized"}
+        except SessionPasswordNeededError:
+            return {"auth_status": "2fa_required"}
+        except PhoneCodeInvalidError:
+            return {"auth_status": "invalid_code"}
+        except FloodWaitError as e:
+            return {"auth_status": "flood_wait", "seconds": e.seconds}

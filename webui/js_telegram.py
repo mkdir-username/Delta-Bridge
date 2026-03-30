@@ -25,7 +25,7 @@ function switchTab(tab) {
   document.getElementById('telegram-view').style.display = tab === 'telegram' ? '' : 'none';
   document.getElementById('tab-browser').className = tab === 'browser' ? 'tab active' : 'tab';
   document.getElementById('tab-telegram').className = tab === 'telegram' ? 'tab active' : 'tab';
-  if (tab === 'telegram') { loadDialogs(); notifCount = 0; var b = document.getElementById('notif-badge'); if (b) b.style.display = 'none'; }
+  if (tab === 'telegram') { checkTgAuth(); notifCount = 0; var b = document.getElementById('notif-badge'); if (b) b.style.display = 'none'; }
 }
 
 function loadDialogs() {
@@ -40,6 +40,8 @@ function loadDialogs() {
       } else if (data.dialogs) {
         allDialogs = data.dialogs;
         renderFilteredDialogs();
+      } else if (data.auth_required || (data.error && data.error.indexOf('not registered') !== -1)) {
+        showAuthWizard();
       } else if (data.error) {
         document.getElementById('tg-chats').innerHTML = '<div class="tg-loading">' + escHtml(data.error) + '</div>';
       }
@@ -55,8 +57,19 @@ function pollTgStatus(id, callback) {
     fetch('/status?id=' + id)
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        if (data.status === 'ready') { clearInterval(poll); callback(data); }
-        else if (data.status === 'error') { clearInterval(poll); alert('Error: ' + (data.error || 'unknown')); }
+        if (data.status === 'ready') {
+          clearInterval(poll);
+          if (data.auth_required) { showAuthWizard(); }
+          else { callback(data); }
+        }
+        else if (data.status === 'error') {
+          clearInterval(poll);
+          if (data.auth_required || (data.error && data.error.indexOf('not registered') !== -1)) {
+            showAuthWizard();
+          } else {
+            document.getElementById('tg-chats').innerHTML = '<div class="tg-loading">' + escHtml(data.error || 'unknown') + '</div>';
+          }
+        }
         if (++attempts > 30) clearInterval(poll);
       });
   }, 2000);
@@ -259,5 +272,147 @@ function pollNotifications() {
 }
 
 setInterval(pollNotifications, 5000);
+
+function checkTgAuth() {
+  var ld = makeLoadingHtml('Проверка авторизации...');
+  document.getElementById('tg-chats').innerHTML = ld.html;
+  startLoadingTimer(ld.id);
+  fetch('/tg?action=check_auth&user_id=' + encodeURIComponent(userId))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'pending') {
+        pollTgStatus(data.id, function(d) {
+          if (d.authorized) { showTgMain(); loadDialogs(); }
+          else showAuthWizard();
+        });
+      } else if (data.authorized) {
+        showTgMain(); loadDialogs();
+      } else {
+        showAuthWizard();
+      }
+    })
+    .catch(function() { showAuthWizard(); });
+}
+
+function showAuthWizard() {
+  document.getElementById('tg-auth').style.display = '';
+  document.getElementById('tg-chats').style.display = 'none';
+  document.getElementById('tg-folders').style.display = 'none';
+  var top = document.querySelector('.tg-sidebar-top');
+  if (top) top.style.display = 'none';
+  document.getElementById('auth-step-phone').style.display = '';
+  document.getElementById('auth-step-code').style.display = 'none';
+  document.getElementById('auth-step-2fa').style.display = 'none';
+}
+
+function showTgMain() {
+  document.getElementById('tg-auth').style.display = 'none';
+  document.getElementById('tg-chats').style.display = '';
+  document.getElementById('tg-folders').style.display = '';
+  var top = document.querySelector('.tg-sidebar-top');
+  if (top) top.style.display = '';
+}
+
+function authStart() {
+  var phone = document.getElementById('auth-phone').value.trim();
+  if (!phone) return;
+  var btn = document.querySelector('#auth-step-phone .auth-btn');
+  btn.textContent = '...';
+  document.getElementById('auth-phone-error').textContent = '';
+  fetch('/tg?action=auth_start&phone=' + encodeURIComponent(phone))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'pending') {
+        pollTgStatus(data.id, handleAuthStartResult);
+      } else {
+        handleAuthStartResult(data);
+      }
+    })
+    .catch(function(e) {
+      btn.textContent = 'Отправить код';
+      document.getElementById('auth-phone-error').textContent = 'Сеть недоступна';
+    });
+}
+
+function handleAuthStartResult(data) {
+  document.querySelector('#auth-step-phone .auth-btn').textContent = 'Отправить код';
+  if (data.auth_status === 'code_required' || data.status === 200) {
+    document.getElementById('auth-step-phone').style.display = 'none';
+    document.getElementById('auth-step-code').style.display = '';
+    document.getElementById('auth-code').focus();
+  } else {
+    document.getElementById('auth-phone-error').textContent = data.error || 'Ошибка';
+  }
+}
+
+function authCode() {
+  var code = document.getElementById('auth-code').value.trim();
+  if (!code) return;
+  var btn = document.querySelector('#auth-step-code .auth-btn');
+  btn.textContent = '...';
+  document.getElementById('auth-code-error').textContent = '';
+  fetch('/tg?action=auth_code&code=' + encodeURIComponent(code))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'pending') {
+        pollTgStatus(data.id, handleAuthCodeResult);
+      } else {
+        handleAuthCodeResult(data);
+      }
+    })
+    .catch(function() {
+      btn.textContent = 'Подтвердить';
+      document.getElementById('auth-code-error').textContent = 'Сеть недоступна';
+    });
+}
+
+function handleAuthCodeResult(data) {
+  document.querySelector('#auth-step-code .auth-btn').textContent = 'Подтвердить';
+  if (data.auth_status === 'authorized') {
+    showTgMain(); loadDialogs();
+  } else if (data.auth_status === '2fa_required') {
+    document.getElementById('auth-step-code').style.display = 'none';
+    document.getElementById('auth-step-2fa').style.display = '';
+    document.getElementById('auth-password').focus();
+  } else if (data.auth_status === 'invalid_code') {
+    document.getElementById('auth-code-error').textContent = 'Неверный код';
+    document.getElementById('auth-code').value = '';
+    document.getElementById('auth-code').focus();
+  } else if (data.auth_status === 'flood_wait') {
+    document.getElementById('auth-code-error').textContent = 'Подожди ' + (data.seconds || '?') + ' сек';
+  } else {
+    document.getElementById('auth-code-error').textContent = data.error || 'Ошибка';
+  }
+}
+
+function auth2FA() {
+  var pw = document.getElementById('auth-password').value;
+  if (!pw) return;
+  var btn = document.querySelector('#auth-step-2fa .auth-btn');
+  btn.textContent = '...';
+  document.getElementById('auth-2fa-error').textContent = '';
+  fetch('/tg?action=auth_code&password=' + encodeURIComponent(pw))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'pending') {
+        pollTgStatus(data.id, handleAuth2FAResult);
+      } else {
+        handleAuth2FAResult(data);
+      }
+    })
+    .catch(function() {
+      btn.textContent = 'Войти';
+      document.getElementById('auth-2fa-error').textContent = 'Сеть недоступна';
+    });
+}
+
+function handleAuth2FAResult(data) {
+  document.querySelector('#auth-step-2fa .auth-btn').textContent = 'Войти';
+  if (data.auth_status === 'authorized') {
+    showTgMain(); loadDialogs();
+  } else {
+    document.getElementById('auth-2fa-error').textContent = data.error || 'Неверный пароль';
+  }
+}
 
 """

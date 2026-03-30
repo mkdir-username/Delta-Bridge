@@ -614,12 +614,12 @@ class TestKitEndpoint:
 class TestBrowserMode:
     def test_html_has_browser_mode_toggle(self):
         html = get_html()
-        assert 'id="browserMode"' in html
+        assert 'id="btnBrowser"' in html
         assert 'toggleBrowserMode' in html
 
     def test_css_has_browser_toggle_style(self):
         html = get_html()
-        assert '.browser-toggle' in html
+        assert '.toolbar-toggle' in html
 
     def test_js_has_browser_mode_var(self):
         html = get_html()
