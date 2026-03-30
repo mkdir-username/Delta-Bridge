@@ -1,0 +1,20 @@
+{
+  "service": "hackernews",
+  "version": "1.0",
+  "description": "Hacker News API",
+  "auth": "none",
+  "actions": {
+    "top_stories": {
+      "steps": [
+        {"type": "http", "method": "GET", "url": "https://hacker-news.firebaseio.com/v0/topstories.json"},
+        {"type": "extract", "source": "body", "path": "$[:10]", "as": "story_ids"}
+      ]
+    },
+    "story_detail": {
+      "steps": [
+        {"type": "http", "method": "GET", "url": "https://hacker-news.firebaseio.com/v0/item/{id}.json"},
+        {"type": "extract", "source": "body", "path": "$", "as": "story"}
+      ]
+    }
+  }
+}
