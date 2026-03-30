@@ -103,7 +103,14 @@ class Handler(BaseHTTPRequestHandler):
                             result[key] = resp[key]
                     if result.get("auth_status") == "authorized":
                         sid = auth.create_session(login_user_id)
-                        result["sid"] = sid
+                        result["set_session"] = True
+                        body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json; charset=utf-8")
+                        self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/".format(sid))
+                        self.end_headers()
+                        self.wfile.write(body)
+                        return
                     self.respond_json(result)
                     return
             self.respond_json({"status": "pending"})

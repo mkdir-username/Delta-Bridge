@@ -141,8 +141,7 @@ function authCode() {{
       pollCount = 0;
       pollStatus(function(resp) {{
         stopLoading();
-        if (resp.auth_status === \'authorized\' && resp.sid) {{
-          document.cookie = \'sid=\'+resp.sid+\'; path=/; SameSite=Strict\';
+        if (resp.auth_status === \'authorized\' && resp.set_session) {{
           window.location.href = \'/\';
         }} else if (resp.auth_status === \'2fa_needed\') {{
           showStep(\'2fa\');
@@ -173,8 +172,7 @@ function auth2FA() {{
       pollCount = 0;
       pollStatus(function(resp) {{
         stopLoading();
-        if (resp.auth_status === \'authorized\' && resp.sid) {{
-          document.cookie = \'sid=\'+resp.sid+\'; path=/; SameSite=Strict\';
+        if (resp.auth_status === \'authorized\' && resp.set_session) {{
           window.location.href = \'/\';
         }} else {{
           showStep(\'2fa\');
