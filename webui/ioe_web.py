@@ -36,11 +36,10 @@ FILENAMES = ["report.pdf", "scan.pdf", "doc.pdf", "invoice.pdf"]
 BODIES = ["", "см. вложение", "Документ"]
 
 DEMO_MODE = "--demo" in sys.argv
-USER_ID = os.environ.get("IOE_USER_ID", "default")
 
 pending = {}
 lock = threading.Lock()
-notification_queue = []
+notification_queues = {}
 
 HTML_PAGE = (
     r"""<!DOCTYPE html>
@@ -81,6 +80,8 @@ def main():
         if arg == "--demo" and i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit():
             port = int(sys.argv[i + 1])
             break
+    from auth import load_users
+    load_users()
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(("0.0.0.0", port), Handler)
     mode = " (demo)" if DEMO_MODE else ""

@@ -1,3 +1,41 @@
+from css import login_css
+
+
+def login_page(error=""):
+    error_html = '<div class="login-error">{}</div>'.format(error) if error else ""
+    return """<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IoE — Login</title>
+<style>
+:root {{
+  --bg-base:#0a0e14; --bg-surface:#161b22; --accent:#4a8fe7;
+  --text-main:#c9d1d9; --text-dim:#545d6e;
+}}
+*, *::before, *::after {{ box-sizing:border-box; margin:0; padding:0; }}
+html {{ background:var(--bg-base); color:var(--text-main); height:100%; }}
+body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; height:100%; }}
+{css}
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-logo">&#9889;</div>
+  <div class="login-title">IoE</div>
+  <div class="login-subtitle">internet over email</div>
+  <form class="login-form" method="POST" action="/login">
+    <input type="text" name="username" placeholder="Username" autocomplete="username" required>
+    <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+    <button type="submit">Войти</button>
+  </form>
+  {error}
+</div>
+</body>
+</html>""".format(css=login_css(), error=error_html)
+
+
 HTML_TAB_BAR = """<div class="tab-bar">
   <button class="tab active" onclick="switchTab('browser')" id="tab-browser">Browser</button>
   <button class="tab" onclick="switchTab('telegram')" id="tab-telegram">Telegram<span class="notif-badge" id="notif-badge" style="display:none"></span></button>
@@ -27,7 +65,6 @@ HTML_BROWSER = """<div id="browser-view">
     <span class="dot"></span>
     <span id="statusText">Ready</span>
   </div>
-  <span class="user-id" id="userId" onclick="promptUserId()" title="Click to change"></span>
   <span class="channel" id="channelInfo">IMAP</span>
 </footer>
 </div>

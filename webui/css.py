@@ -518,3 +518,19 @@ footer .channel { color: var(--text-dim); }
 .auth-error { color:#f85; font-size:12px; margin-top:8px; min-height:16px; }
 
 """
+
+
+LOGIN_CSS = """\
+.login-wrap { max-width:300px; margin:20vh auto; text-align:center; }
+.login-logo { font-size:48px; margin-bottom:8px; }
+.login-title { font-size:24px; letter-spacing:8px; color:var(--text-dim); }
+.login-subtitle { font-size:11px; letter-spacing:4px; color:var(--text-dim); margin-bottom:32px; }
+.login-form input { display:block; width:100%; padding:10px 12px; margin-bottom:8px; background:var(--bg-surface); border:1px solid #222; border-radius:6px; color:var(--text-main); font-size:14px; }
+.login-form input:focus { outline:none; border-color:var(--accent); }
+.login-form button { width:100%; padding:10px; margin-top:4px; background:var(--accent); border:none; color:#fff; border-radius:6px; cursor:pointer; font-size:14px; }
+.login-error { color:#f85; font-size:12px; margin-top:8px; }
+"""
+
+
+def login_css():
+    return LOGIN_CSS

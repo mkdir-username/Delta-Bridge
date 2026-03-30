@@ -51,7 +51,7 @@ def extract_attachment(raw):
     return None
 
 
-def poll_response(req_id):
+def poll_response(user_id, req_id):
     import ioe_web
     t0 = time.time()
     try:
@@ -86,14 +86,14 @@ def poll_response(req_id):
                     response = json.loads(decrypted)
                     if response.get("type") == "notification":
                         with ioe_web.lock:
-                            ioe_web.notification_queue.append(response)
+                            ioe_web.notification_queues.setdefault(user_id, []).append(response)
                         continue
                     rid = response.get("id", "")
                     if rid == req_id:
                         elapsed = time.time() - t0
                         log.info("[%s] poll: FOUND response (%.1fs, status=%s)", req_id, elapsed, response.get("status"))
                         with ioe_web.lock:
-                            ioe_web.pending[req_id] = response
+                            ioe_web.pending[(user_id, req_id)] = response
                         m.logout()
                         return
                 except Exception as e:
@@ -104,13 +104,13 @@ def poll_response(req_id):
         elapsed = time.time() - t0
         log.warning("[%s] poll: TIMEOUT after %.0fs", req_id, elapsed)
         with ioe_web.lock:
-            ioe_web.pending[req_id] = {"id": req_id, "status": 504, "error": "timeout ({}s)".format(int(elapsed))}
+            ioe_web.pending[(user_id, req_id)] = {"id": req_id, "status": 504, "error": "timeout ({}s)".format(int(elapsed))}
         m.logout()
     except Exception as e:
         elapsed = time.time() - t0
         log.error("[%s] poll: ERROR after %.0fs: %s", req_id, elapsed, e)
         with ioe_web.lock:
-            ioe_web.pending[req_id] = {"id": req_id, "status": 500, "error": str(e)}
+            ioe_web.pending[(user_id, req_id)] = {"id": req_id, "status": 500, "error": str(e)}
 
 
 def rewrite_links(html):

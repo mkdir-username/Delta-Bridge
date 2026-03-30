@@ -8,6 +8,7 @@ import logging
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
+import auth
 from transport import imap_conn, send_request, poll_response
 
 log = logging.getLogger("ioe-web")
@@ -52,6 +53,24 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
 
+        if parsed.path == "/login":
+            self._serve_login()
+            return
+        if parsed.path == "/logout":
+            auth.delete_session(self.headers.get("Cookie", ""))
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.send_header("Set-Cookie", "sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+            self.end_headers()
+            return
+
+        user_id = auth.get_authenticated_user(self.headers.get("Cookie", ""))
+        if not user_id:
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.end_headers()
+            return
+
         if parsed.path == "/":
             body = ioe_web.HTML_PAGE.encode("utf-8")
             self.send_response(200)
@@ -66,8 +85,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/status":
             req_id = qs.get("id", [""])[0]
             with ioe_web.lock:
-                if req_id in ioe_web.pending:
-                    resp = ioe_web.pending.pop(req_id)
+                if (user_id, req_id) in ioe_web.pending:
+                    resp = ioe_web.pending.pop((user_id, req_id))
                     if resp.get("status") == 200:
                         result = {"status": "ready"}
                         if "results" in resp:
@@ -89,8 +108,6 @@ class Handler(BaseHTTPRequestHandler):
                     return
             self.respond_json({"status": "pending"})
             return
-
-        user_id = qs.get("user_id", [ioe_web.USER_ID])[0]
 
         if parsed.path in ("/get", "/text", "/search"):
             req_id = uuid.uuid4().hex[:8]
@@ -117,7 +134,7 @@ class Handler(BaseHTTPRequestHandler):
                 log.error("[%s] send: FAILED: %s", req_id, e)
                 self.respond_json({"status": "error", "error": str(e)})
                 return
-            t = threading.Thread(target=poll_response, args=(req_id,), daemon=True)
+            t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
             t.start()
             self.respond_json({"id": req_id, "status": "pending"})
             return
@@ -161,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json({"status": "error", "error": str(e)})
                 return
 
-            t = threading.Thread(target=poll_response, args=(req_id,), daemon=True)
+            t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
             t.start()
             self.respond_json({"id": req_id, "status": "pending"})
             return
@@ -182,7 +199,7 @@ class Handler(BaseHTTPRequestHandler):
                 "user_id": user_id,
             }
             for key in qs:
-                if key != "action":
+                if key not in ("action", "user_id"):
                     req[key] = qs[key][0]
             if "chat_id" in req:
                 try:
@@ -206,15 +223,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json({"status": "error", "error": str(e)})
                 return
 
-            t = threading.Thread(target=poll_response, args=(req_id,), daemon=True)
+            t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
             t.start()
             self.respond_json({"id": req_id, "status": "pending"})
             return
 
         if parsed.path == "/notifications":
             with ioe_web.lock:
-                notifs = list(ioe_web.notification_queue)
-                ioe_web.notification_queue.clear()
+                notifs = list(ioe_web.notification_queues.get(user_id, []))
+                if user_id in ioe_web.notification_queues:
+                    ioe_web.notification_queues[user_id] = []
             self.respond_json({"notifications": notifs})
             return
 
@@ -263,9 +281,99 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json({"status": "error", "error": str(e)})
                 return
 
-            t = threading.Thread(target=poll_response, args=(req_id,), daemon=True)
+            t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
             t.start()
             self.respond_json({"id": req_id, "status": "pending"})
             return
 
         self.send_error(404)
+
+    def _serve_login(self, error="", status=200):
+        from html_templates import login_page
+        body = login_page(error).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        import ioe_web
+        from transport import imap_conn, send_request, poll_response
+
+        parsed = urlparse(self.path)
+
+        if parsed.path == "/login":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode()
+            params = parse_qs(body)
+            username = params.get("username", [""])[0]
+            password = params.get("password", [""])[0]
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self._serve_login("Слишком много попыток. Подожди минуту.", 429)
+                return
+            if username and password and auth.verify_password(username, password):
+                sid = auth.create_session(username)
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/".format(sid))
+                self.end_headers()
+            else:
+                self._serve_login("Неверный логин или пароль")
+            return
+
+        user_id = auth.get_authenticated_user(self.headers.get("Cookie", ""))
+        if not user_id:
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.end_headers()
+            return
+
+        if parsed.path != "/tg":
+            self.send_error(404)
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(content_length) if content_length else b"{}"
+        try:
+            body = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            self.respond_json({"status": "error", "error": "invalid JSON"}, 400)
+            return
+
+        req_id = uuid.uuid4().hex[:8]
+        action = body.get("action", "")
+
+        if ioe_web.DEMO_MODE:
+            self.respond_json({"status": "error", "error": "telegram not available in demo"})
+            return
+
+        req = {
+            "id": req_id,
+            "type": "command",
+            "service": "telegram",
+            "action": action,
+            "user_id": user_id,
+        }
+        for key in body:
+            if key not in ("action", "user_id"):
+                req[key] = body[key]
+        if "chat_id" in req:
+            try:
+                req["chat_id"] = int(req["chat_id"])
+            except (ValueError, TypeError):
+                pass
+
+        try:
+            log.info("[%s] tg POST: %s", req_id, action)
+            m = imap_conn()
+            send_request(m, req)
+            m.logout()
+        except Exception as e:
+            log.error("[%s] tg POST send FAILED: %s", req_id, e)
+            self.respond_json({"status": "error", "error": str(e)})
+            return
+
+        t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
+        t.start()
+        self.respond_json({"id": req_id, "status": "pending"})
