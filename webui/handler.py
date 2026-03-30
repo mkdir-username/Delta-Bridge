@@ -159,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path in ("/get", "/text", "/search"):
-            req_id = secrets.token_hex(16)
+            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
             cmd = parsed.path.lstrip("/").upper()
 
             if ioe_web.DEMO_MODE:
@@ -189,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/proxy":
-            req_id = secrets.token_hex(16)
+            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
 
             if ioe_web.DEMO_MODE:
                 self.respond_json({"status": "error", "error": "proxy not available in demo"})
@@ -233,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/tg":
-            req_id = secrets.token_hex(16)
+            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
             action = qs.get("action", [""])[0]
 
             if ioe_web.DEMO_MODE:
@@ -306,7 +306,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/browser":
-            req_id = secrets.token_hex(16)
+            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
             url = qs.get("url", [""])[0]
 
             if ioe_web.DEMO_MODE:
@@ -367,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if action == "auth_start" and not auth.is_whitelisted(phone):
             time.sleep(2)
-            req_id = secrets.token_hex(16)
+            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
             login_user_id = phone or "login"
             with ioe_web.lock:
                 ioe_web.pending[(login_user_id, req_id)] = {
@@ -398,7 +398,7 @@ class Handler(BaseHTTPRequestHandler):
             attempts.append(now)
             _code_attempts[phone] = attempts
 
-        req_id = secrets.token_hex(16)
+        req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
         login_user_id = phone or "login"
         req = {
             "id": req_id, "type": "command", "service": "telegram",
@@ -471,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"status": "error", "error": "invalid JSON"}, 400)
             return
 
-        req_id = secrets.token_hex(16)
+        req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
         action = body.get("action", "")
 
         if ioe_web.DEMO_MODE:

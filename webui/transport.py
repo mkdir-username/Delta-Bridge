@@ -86,13 +86,22 @@ def poll_response(user_id, req_id):
                     decrypted = decrypt(ioe_web.IOE_KEY, att.decode("ascii").strip())
                     response = json.loads(decrypted)
                     if response.get("type") == "notification":
+                        uid_key = uid.decode() if isinstance(uid, bytes) else str(uid)
                         with ioe_web.lock:
+                            if uid_key in ioe_web.seen_notification_uids:
+                                continue
+                            ioe_web.seen_notification_uids.add(uid_key)
                             ioe_web.notification_queues.setdefault(user_id, []).append(response)
                         continue
                     rid = response.get("id", "")
                     if rid == req_id:
                         elapsed = time.time() - t0
                         log.info("[%s] poll: FOUND response (%.1fs, status=%s)", req_id, elapsed, response.get("status"))
+                        try:
+                            m.store(uid, "+FLAGS", "\\Deleted")
+                            m.expunge()
+                        except Exception:
+                            pass
                         with ioe_web.lock:
                             ioe_web.pending[(user_id, req_id)] = response
                         m.logout()
@@ -102,6 +111,17 @@ def poll_response(user_id, req_id):
                     continue
             if cycle % 5 == 4:
                 log.debug("[%s] poll: cycle %d, %.0fs elapsed, %d uids checked", req_id, cycle, time.time() - t0, len(seen_uids))
+            if cycle % 10 == 9:
+                from datetime import datetime, timedelta
+                cutoff = (datetime.utcnow() - timedelta(minutes=5)).strftime("%d-%b-%Y")
+                try:
+                    _, old = m.search(None, "BEFORE", cutoff)
+                    if old[0]:
+                        for old_uid in old[0].split():
+                            m.store(old_uid, "+FLAGS", "\\Deleted")
+                        m.expunge()
+                except Exception:
+                    pass
         elapsed = time.time() - t0
         log.warning("[%s] poll: TIMEOUT after %.0fs", req_id, elapsed)
         with ioe_web.lock:
