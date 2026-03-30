@@ -92,7 +92,7 @@ def poll_response(req_id):
             if not msgs[0]:
                 continue
             uids = msgs[0].split()
-            new_uids = [u for u in uids[-20:] if u not in seen_uids]
+            new_uids = [u for u in uids if u not in seen_uids]
             if not new_uids and cycle > 0:
                 continue
             for uid in reversed(new_uids):

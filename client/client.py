@@ -71,7 +71,7 @@ def wait_response(m, req_id, timeout=90):
         if not msgs[0]:
             continue
         uids = msgs[0].split()
-        for uid in reversed(uids[-20:]):
+        for uid in reversed(uids):
             _, data = m.fetch(uid, "(RFC822)")
             raw = data[0][1]
             if not isinstance(raw, bytes):
