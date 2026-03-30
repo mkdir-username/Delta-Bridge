@@ -606,6 +606,35 @@ footer .channel { color: var(--text-dim); }
   }
 }
 
+/* === Tab bar === */
+.tab-bar { display:flex; gap:0; background:var(--bg-surface); border-bottom:1px solid var(--border); }
+.tab-bar button { background:none; border:none; color:var(--text-muted); padding:8px 16px; cursor:pointer; font-size:14px; font-family:var(--font-ui); }
+.tab-bar button.active { color:var(--text); border-bottom:2px solid var(--accent); }
+
+/* === Telegram === */
+.tg-layout { display:flex; height:calc(100vh - 80px); }
+.tg-sidebar { width:30%; border-right:1px solid var(--border); overflow-y:auto; }
+.tg-main { flex:1; display:flex; flex-direction:column; }
+.tg-header { padding:12px; font-weight:bold; border-bottom:1px solid var(--border); }
+.tg-messages { flex:1; overflow-y:auto; padding:8px; }
+.tg-compose { display:flex; padding:8px; gap:8px; border-top:1px solid var(--border); }
+.tg-compose input { flex:1; padding:8px; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:6px; font-family:var(--font-ui); font-size:13px; outline:none; }
+.tg-compose input:focus { border-color:var(--accent); }
+.tg-compose button { padding:8px 16px; background:var(--accent); border:none; color:#fff; border-radius:6px; cursor:pointer; font-family:var(--font-ui); }
+.tg-chat { padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; }
+.tg-chat:hover { background:var(--bg-hover); }
+.tg-chat-name { font-weight:bold; }
+.tg-badge { background:var(--accent); color:#fff; border-radius:10px; padding:1px 6px; font-size:12px; margin-left:8px; }
+.tg-last-msg { color:var(--text-muted); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+.tg-msg { padding:6px 0; }
+.tg-msg:hover { background:var(--bg-hover); cursor:pointer; border-radius:4px; }
+.tg-sender { color:var(--accent); font-weight:bold; font-size:13px; }
+.tg-text { margin:2px 0; }
+.tg-time { color:var(--text-dim); font-size:11px; }
+.tg-reply-marker { color:var(--text-muted); font-size:11px; margin-left:4px; }
+.tg-reply-bar { padding:4px 12px; background:var(--bg-surface); border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); }
+.tg-loading { padding:20px; color:var(--text-dim); text-align:center; }
+
 </style>
 <script>
 /**
@@ -682,6 +711,12 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 </head>
 <body>
 
+<div class="tab-bar">
+  <button class="tab active" onclick="switchTab('browser')" id="tab-browser">Browser</button>
+  <button class="tab" onclick="switchTab('telegram')" id="tab-telegram">Telegram</button>
+</div>
+
+<div id="browser-view">
 <div class="toolbar">
   <input type="text" id="url" placeholder="URL или поисковый запрос..."
          autocomplete="off" autocapitalize="off" spellcheck="false" value="">
@@ -705,6 +740,27 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   </div>
   <span class="channel" id="channelInfo">IMAP</span>
 </footer>
+</div>
+
+<div id="telegram-view" style="display:none">
+  <div class="tg-layout">
+    <div class="tg-sidebar" id="tg-chats">
+      <div class="tg-loading">Loading chats...</div>
+    </div>
+    <div class="tg-main">
+      <div class="tg-header" id="tg-chat-title">Select a chat</div>
+      <div class="tg-messages" id="tg-messages"></div>
+      <div class="tg-reply-bar" id="tg-reply-bar" style="display:none">
+        Replying to message <span id="tg-reply-to"></span>
+        <button onclick="cancelReply()" style="background:none;border:none;color:var(--text-muted);cursor:pointer">&#10005;</button>
+      </div>
+      <div class="tg-compose">
+        <input type="text" id="tg-input" placeholder="Message..." onkeydown="if(event.key==='Enter')sendTgMessage()">
+        <button onclick="sendTgMessage()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 var busy = false, pollTimer = null, loadTimer = null, t0 = 0;
@@ -980,6 +1036,133 @@ function copyMd() {
 }
 
 urlInput.focus();
+
+var currentChatId = null;
+var replyToId = null;
+
+function switchTab(tab) {
+  document.getElementById('browser-view').style.display = tab === 'browser' ? '' : 'none';
+  document.getElementById('telegram-view').style.display = tab === 'telegram' ? '' : 'none';
+  document.getElementById('tab-browser').className = tab === 'browser' ? 'tab active' : 'tab';
+  document.getElementById('tab-telegram').className = tab === 'telegram' ? 'tab active' : 'tab';
+  if (tab === 'telegram') loadDialogs();
+}
+
+function loadDialogs() {
+  fetch('/tg?action=get_dialogs&limit=30')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'pending') {
+        pollTgStatus(data.id, renderDialogs);
+      } else if (data.dialogs) {
+        renderDialogs(data);
+      } else if (data.error) {
+        document.getElementById('tg-chats').innerHTML = '<div class="tg-loading">' + escHtml(data.error) + '</div>';
+      }
+    })
+    .catch(function(e) {
+      document.getElementById('tg-chats').innerHTML = '<div class="tg-loading">Error: ' + escHtml(String(e)) + '</div>';
+    });
+}
+
+function pollTgStatus(id, callback) {
+  var attempts = 0;
+  var poll = setInterval(function() {
+    fetch('/status?id=' + id)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ready') {
+          clearInterval(poll);
+          callback(data);
+        } else if (data.status === 'error') {
+          clearInterval(poll);
+          alert('Error: ' + (data.error || 'unknown'));
+        }
+        if (++attempts > 30) clearInterval(poll);
+      });
+  }, 2000);
+}
+
+function renderDialogs(data) {
+  var list = document.getElementById('tg-chats');
+  var dialogs = data.dialogs || [];
+  if (!dialogs.length) { list.innerHTML = '<div class="tg-loading">No chats</div>'; return; }
+  list.innerHTML = dialogs.map(function(d) {
+    return '<div class="tg-chat" onclick="openChat(' + d.id + ', this)" data-name="' + escAttr(d.name) + '">' +
+      '<span class="tg-chat-name">' + escHtml(d.name) + '</span>' +
+      (d.unread > 0 ? '<span class="tg-badge">' + d.unread + '</span>' : '') +
+      '<div class="tg-last-msg">' + escHtml((d.last_message || '').substring(0, 50)) + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+function openChat(chatId, el) {
+  currentChatId = chatId;
+  var name = el ? el.getAttribute('data-name') : '';
+  document.getElementById('tg-chat-title').textContent = name || 'Chat';
+  document.getElementById('tg-messages').innerHTML = '<div class="tg-loading">Loading...</div>';
+  cancelReply();
+  fetch('/tg?action=get_messages&chat_id=' + chatId + '&limit=30')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'pending') pollTgStatus(data.id, renderMessages);
+      else if (data.messages) renderMessages(data);
+    });
+  fetch('/tg?action=mark_read&chat_id=' + chatId);
+}
+
+function renderMessages(data) {
+  var container = document.getElementById('tg-messages');
+  var msgs = (data.messages || []).slice().reverse();
+  if (!msgs.length) { container.innerHTML = '<div class="tg-loading">No messages</div>'; return; }
+  container.innerHTML = msgs.map(function(m) {
+    return '<div class="tg-msg" data-id="' + m.id + '" onclick="setReply(' + m.id + ')">' +
+      '<span class="tg-sender">' + escHtml(m.sender || '') + '</span>' +
+      (m.reply_to_id ? ' <span class="tg-reply-marker">&#8617;</span>' : '') +
+      '<div class="tg-text">' + escHtml(m.text || '') + '</div>' +
+      '<span class="tg-time">' + (m.date ? new Date(m.date).toLocaleTimeString() : '') + '</span>' +
+      '</div>';
+  }).join('');
+  container.scrollTop = container.scrollHeight;
+}
+
+function setReply(msgId) {
+  replyToId = msgId;
+  document.getElementById('tg-reply-bar').style.display = 'flex';
+  document.getElementById('tg-reply-to').textContent = '#' + msgId;
+  document.getElementById('tg-input').focus();
+}
+
+function cancelReply() {
+  replyToId = null;
+  document.getElementById('tg-reply-bar').style.display = 'none';
+}
+
+function sendTgMessage() {
+  var input = document.getElementById('tg-input');
+  var text = input.value.trim();
+  if (!text || !currentChatId) return;
+
+  var url;
+  if (replyToId) {
+    url = '/tg?action=reply&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text) + '&reply_to_id=' + replyToId;
+  } else {
+    url = '/tg?action=send_message&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text);
+  }
+
+  fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.status === 'pending') {
+      pollTgStatus(data.id, function() {
+        input.value = '';
+        cancelReply();
+        var title = document.getElementById('tg-chat-title').textContent;
+        openChat(currentChatId, null);
+        document.getElementById('tg-chat-title').textContent = title;
+      });
+    }
+  });
+}
+
 </script>
 </body>
 </html>"""
@@ -1040,6 +1223,10 @@ class Handler(BaseHTTPRequestHandler):
                         result = {"status": "ready"}
                         if "results" in resp:
                             result["results"] = resp["results"]
+                        elif resp.get("type") == "command" or "dialogs" in resp or "messages" in resp or "unread_chats" in resp:
+                            for key in resp:
+                                if key not in ("id", "status"):
+                                    result[key] = resp[key]
                         else:
                             result["title"] = resp.get("title", "")
                             result["body"] = resp.get("body", "")
@@ -1119,6 +1306,49 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] proxy send FAILED: %s", req_id, e)
+                self.respond_json({"status": "error", "error": str(e)})
+                return
+
+            t = threading.Thread(target=poll_response, args=(req_id,), daemon=True)
+            t.start()
+            self.respond_json({"id": req_id, "status": "pending"})
+            return
+
+        if parsed.path == "/tg":
+            req_id = uuid.uuid4().hex[:8]
+            action = qs.get("action", [""])[0]
+
+            if DEMO_MODE:
+                self.respond_json({"status": "error", "error": "telegram not available in demo"})
+                return
+
+            req = {
+                "id": req_id,
+                "type": "command",
+                "service": "telegram",
+                "action": action,
+            }
+            for key in qs:
+                if key != "action":
+                    req[key] = qs[key][0]
+            if "chat_id" in req:
+                try:
+                    req["chat_id"] = int(req["chat_id"])
+                except ValueError:
+                    pass
+            if "limit" in req:
+                try:
+                    req["limit"] = int(req["limit"])
+                except ValueError:
+                    pass
+
+            try:
+                log.info("[%s] tg: %s", req_id, action)
+                m = imap_conn()
+                send_request(m, req)
+                m.logout()
+            except Exception as e:
+                log.error("[%s] tg send FAILED: %s", req_id, e)
                 self.respond_json({"status": "error", "error": str(e)})
                 return
 
