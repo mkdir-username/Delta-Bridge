@@ -94,6 +94,8 @@ class TelegramAdapter:
                     "last_message": d.message.text if d.message else "",
                     "date": d.date.isoformat() if d.date else "",
                     "type": dtype,
+                    "archived": d.archived,
+                    "pinned": d.pinned,
                 })
             return result
 

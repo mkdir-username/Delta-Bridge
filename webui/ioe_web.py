@@ -617,7 +617,7 @@ footer .channel { color: var(--text-dim); }
 .tab-bar button.active { color:var(--text); border-bottom:2px solid var(--accent); }
 
 /* === Telegram === */
-.tg-layout { display:flex; height:calc(100vh - 80px); }
+.tg-layout { display:flex; height:calc(100vh - 38px); }
 .tg-sidebar { width:30%; min-width:220px; max-width:320px; border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; }
 .tg-sidebar-top { padding:8px; border-bottom:1px solid var(--border); }
 .tg-search { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:6px; font-family:var(--font-ui); font-size:13px; outline:none; box-sizing:border-box; }
@@ -776,11 +776,11 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         <input type="text" class="tg-search" id="tg-search" placeholder="Search chats..." oninput="filterChats()">
       </div>
       <div class="tg-folders" id="tg-folders">
-        <button class="tg-folder active" data-folder="all" onclick="setFolder('all')">All</button>
-        <button class="tg-folder" data-folder="unread" onclick="setFolder('unread')">Unread</button>
-        <button class="tg-folder" data-folder="user" onclick="setFolder('user')">Private</button>
+        <button class="tg-folder active" data-folder="user" onclick="setFolder('user')">Private</button>
         <button class="tg-folder" data-folder="group" onclick="setFolder('group')">Groups</button>
         <button class="tg-folder" data-folder="channel" onclick="setFolder('channel')">Channels</button>
+        <button class="tg-folder" data-folder="all" onclick="setFolder('all')">All</button>
+        <button class="tg-folder" data-folder="unread" onclick="setFolder('unread')">Unread</button>
       </div>
       <div class="tg-chatlist" id="tg-chats">
         <div class="loading"><div class="spinner"></div><div>Loading chats...</div><div class="timer">0.0s</div></div>
@@ -1083,7 +1083,7 @@ urlInput.focus();
 var currentChatId = null;
 var replyToId = null;
 var allDialogs = [];
-var currentFolder = 'all';
+var currentFolder = 'user';
 var tgTimers = {};
 
 function makeLoadingHtml(msg) {
@@ -1158,6 +1158,7 @@ function filterChats() {
 function renderFilteredDialogs() {
   var query = (document.getElementById('tg-search').value || '').toLowerCase();
   var filtered = allDialogs.filter(function(d) {
+    if (d.archived && currentFolder !== 'all') return false;
     if (currentFolder === 'unread' && d.unread <= 0) return false;
     if (currentFolder !== 'all' && currentFolder !== 'unread' && d.type !== currentFolder) return false;
     if (query && (d.name || '').toLowerCase().indexOf(query) === -1) return false;
