@@ -783,7 +783,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         <button class="tg-folder" data-folder="channel" onclick="setFolder('channel')">Channels</button>
       </div>
       <div class="tg-chatlist" id="tg-chats">
-        <div class="tg-loading">Loading chats...</div>
+        <div class="loading"><div class="spinner"></div><div>Loading chats...</div><div class="timer">0.0s</div></div>
       </div>
     </div>
     <div class="tg-main">
@@ -1084,6 +1084,23 @@ var currentChatId = null;
 var replyToId = null;
 var allDialogs = [];
 var currentFolder = 'all';
+var tgTimers = {};
+
+function makeLoadingHtml(msg) {
+  var id = 'lt' + Date.now();
+  return {id: id, html: '<div class="loading"><div class="spinner"></div><div>' + escHtml(msg) + '</div><div class="timer" id="' + id + '">0.0s</div></div>'};
+}
+
+function startLoadingTimer(timerId) {
+  var t = Date.now();
+  var iv = setInterval(function() {
+    var el = document.getElementById(timerId);
+    if (!el) { clearInterval(iv); return; }
+    el.textContent = ((Date.now() - t) / 1000).toFixed(1) + 's';
+  }, 100);
+  tgTimers[timerId] = iv;
+  return iv;
+}
 
 function switchTab(tab) {
   document.getElementById('browser-view').style.display = tab === 'browser' ? '' : 'none';
@@ -1094,6 +1111,9 @@ function switchTab(tab) {
 }
 
 function loadDialogs() {
+  var ld = makeLoadingHtml('Loading chats...');
+  document.getElementById('tg-chats').innerHTML = ld.html;
+  startLoadingTimer(ld.id);
   fetch('/tg?action=get_dialogs&limit=30')
     .then(function(r) { return r.json(); })
     .then(function(data) {
@@ -1205,7 +1225,9 @@ function openChat(chatId, el) {
   currentChatId = chatId;
   var name = el ? el.getAttribute('data-name') : document.getElementById('tg-chat-title').textContent;
   document.getElementById('tg-chat-title').textContent = name || 'Chat';
-  document.getElementById('tg-messages').innerHTML = '<div class="tg-loading">Loading...</div>';
+  var ld = makeLoadingHtml('Loading messages...');
+  document.getElementById('tg-messages').innerHTML = ld.html;
+  startLoadingTimer(ld.id);
   cancelReply();
   renderFilteredDialogs();
   fetch('/tg?action=get_messages&chat_id=' + chatId + '&limit=30')
