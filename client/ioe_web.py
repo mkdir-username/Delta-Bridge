@@ -85,8 +85,9 @@ def poll_response(req_id):
         log.info("[%s] poll: connected (%.1fs)", req_id, time.time() - t0)
         m.select("INBOX")
         seen_uids = set()
-        for cycle in range(30):
-            time.sleep(2)
+        for cycle in range(60):
+            if cycle > 0:
+                time.sleep(1)
             m.noop()
             _, msgs = m.search(None, "ALL")
             if not msgs[0]:
