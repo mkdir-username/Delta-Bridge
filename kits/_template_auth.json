@@ -1,0 +1,24 @@
+{
+  "service": "_template_auth",
+  "version": "1.0",
+  "description": "Template for cookie-auth services",
+  "auth": "cookie",
+  "auth_config": {
+    "login_action": "login",
+    "session_id_field": "session_id"
+  },
+  "actions": {
+    "login": {
+      "steps": [
+        {"type": "http", "method": "POST", "url": "https://example.com/api/login", "body": {"username": "{username}", "password": "{password}"}},
+        {"type": "extract", "source": "body", "path": "$.session_id", "as": "session_id"}
+      ]
+    },
+    "get_profile": {
+      "steps": [
+        {"type": "http", "method": "GET", "url": "https://example.com/api/profile", "headers": {"Cookie": "session={session_id}"}},
+        {"type": "extract", "source": "body", "path": "$", "as": "profile"}
+      ]
+    }
+  }
+}

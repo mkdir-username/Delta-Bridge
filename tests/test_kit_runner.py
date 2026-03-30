@@ -71,3 +71,9 @@ class TestHackerNewsKit:
         assert kit["service"] == "hackernews"
         assert "top_stories" in kit["actions"]
         assert "story_detail" in kit["actions"]
+
+    def test_auth_template_loads(self):
+        kit_path = os.path.join(os.path.dirname(__file__), "..", "kits", "_template_auth.json")
+        kit = KitRunner(lambda r: {}).load_kit(kit_path)
+        assert kit["auth"] == "cookie"
+        assert "login" in kit["actions"]
