@@ -89,6 +89,8 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"status": "pending"})
             return
 
+        user_id = qs.get("user_id", [ioe_web.USER_ID])[0]
+
         if parsed.path in ("/get", "/text", "/search"):
             req_id = uuid.uuid4().hex[:8]
             cmd = parsed.path.lstrip("/").upper()
@@ -99,10 +101,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if cmd == "SEARCH":
                 q = qs.get("q", [""])[0]
-                req = {"id": req_id, "cmd": "SEARCH", "query": q}
+                req = {"id": req_id, "cmd": "SEARCH", "query": q, "user_id": user_id}
             else:
                 url = qs.get("url", [""])[0]
-                req = {"id": req_id, "cmd": cmd, "url": url}
+                req = {"id": req_id, "cmd": cmd, "url": url, "user_id": user_id}
             try:
                 t0 = time.time()
                 log.info("[%s] send: %s %s", req_id, cmd, req.get("query", req.get("url", "")))
@@ -138,6 +140,7 @@ class Handler(BaseHTTPRequestHandler):
                 "method": method,
                 "url": url,
                 "extract": extract,
+                "user_id": user_id,
             }
             if body_str:
                 try:
@@ -175,6 +178,7 @@ class Handler(BaseHTTPRequestHandler):
                 "type": "command",
                 "service": "telegram",
                 "action": action,
+                "user_id": user_id,
             }
             for key in qs:
                 if key != "action":
@@ -204,6 +208,13 @@ class Handler(BaseHTTPRequestHandler):
             t = threading.Thread(target=poll_response, args=(req_id,), daemon=True)
             t.start()
             self.respond_json({"id": req_id, "status": "pending"})
+            return
+
+        if parsed.path == "/notifications":
+            with ioe_web.lock:
+                notifs = list(ioe_web.notification_queue)
+                ioe_web.notification_queue.clear()
+            self.respond_json({"notifications": notifs})
             return
 
         self.send_error(404)

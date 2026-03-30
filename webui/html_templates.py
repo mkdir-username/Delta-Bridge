@@ -1,6 +1,6 @@
 HTML_TAB_BAR = """<div class="tab-bar">
   <button class="tab active" onclick="switchTab('browser')" id="tab-browser">Browser</button>
-  <button class="tab" onclick="switchTab('telegram')" id="tab-telegram">Telegram</button>
+  <button class="tab" onclick="switchTab('telegram')" id="tab-telegram">Telegram<span class="notif-badge" id="notif-badge" style="display:none"></span></button>
 </div>
 """
 
@@ -26,6 +26,7 @@ HTML_BROWSER = """<div id="browser-view">
     <span class="dot"></span>
     <span id="statusText">Ready</span>
   </div>
+  <span class="user-id" id="userId" onclick="promptUserId()" title="Click to change"></span>
   <span class="channel" id="channelInfo">IMAP</span>
 </footer>
 </div>

@@ -36,9 +36,11 @@ FILENAMES = ["report.pdf", "scan.pdf", "doc.pdf", "invoice.pdf"]
 BODIES = ["", "см. вложение", "Документ"]
 
 DEMO_MODE = "--demo" in sys.argv
+USER_ID = os.environ.get("IOE_USER_ID", "default")
 
 pending = {}
 lock = threading.Lock()
+notification_queue = []
 
 HTML_PAGE = (
     r"""<!DOCTYPE html>

@@ -25,14 +25,14 @@ function switchTab(tab) {
   document.getElementById('telegram-view').style.display = tab === 'telegram' ? '' : 'none';
   document.getElementById('tab-browser').className = tab === 'browser' ? 'tab active' : 'tab';
   document.getElementById('tab-telegram').className = tab === 'telegram' ? 'tab active' : 'tab';
-  if (tab === 'telegram') loadDialogs();
+  if (tab === 'telegram') { loadDialogs(); notifCount = 0; var b = document.getElementById('notif-badge'); if (b) b.style.display = 'none'; }
 }
 
 function loadDialogs() {
   var ld = makeLoadingHtml('Loading chats...');
   document.getElementById('tg-chats').innerHTML = ld.html;
   startLoadingTimer(ld.id);
-  fetch('/tg?action=get_dialogs&limit=30')
+  fetch('/tg?action=get_dialogs&limit=30&user_id=' + encodeURIComponent(userId))
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
@@ -149,13 +149,13 @@ function openChat(chatId, el) {
   startLoadingTimer(ld.id);
   cancelReply();
   renderFilteredDialogs();
-  fetch('/tg?action=get_messages&chat_id=' + chatId + '&limit=30')
+  fetch('/tg?action=get_messages&chat_id=' + chatId + '&limit=30&user_id=' + encodeURIComponent(userId))
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') pollTgStatus(data.id, renderMessages);
       else if (data.messages) renderMessages(data);
     });
-  fetch('/tg?action=mark_read&chat_id=' + chatId);
+  fetch('/tg?action=mark_read&chat_id=' + chatId + '&user_id=' + encodeURIComponent(userId));
 }
 
 function formatMsgDate(iso) {
@@ -222,9 +222,9 @@ function sendTgMessage() {
 
   var url;
   if (replyToId) {
-    url = '/tg?action=reply&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text) + '&reply_to_id=' + replyToId;
+    url = '/tg?action=reply&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text) + '&reply_to_id=' + replyToId + '&user_id=' + encodeURIComponent(userId);
   } else {
-    url = '/tg?action=send_message&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text);
+    url = '/tg?action=send_message&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text) + '&user_id=' + encodeURIComponent(userId);
   }
 
   fetch(url).then(function(r) { return r.json(); }).then(function(data) {
@@ -239,5 +239,25 @@ function sendTgMessage() {
     input.disabled = false; btn.disabled = false; btn.textContent = 'Send';
   });
 }
+
+var notifCount = 0;
+
+function pollNotifications() {
+  fetch('/notifications')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.notifications && data.notifications.length > 0) {
+        notifCount += data.notifications.length;
+        var badge = document.getElementById('notif-badge');
+        if (badge) {
+          badge.textContent = notifCount;
+          badge.style.display = '';
+        }
+      }
+    })
+    .catch(function() {});
+}
+
+setInterval(pollNotifications, 5000);
 
 """

@@ -381,6 +381,8 @@ footer .status .dot {
 }
 
 footer .channel { color: var(--text-dim); }
+.user-id { font-size: 11px; color: var(--text-muted); opacity: 0.7; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.user-id:hover { opacity: 1; background: rgba(255,255,255,0.1); }
 
 /* === Back button === */
 .back-btn {
@@ -457,6 +459,7 @@ footer .channel { color: var(--text-dim); }
 .tab-bar { display:flex; gap:0; background:var(--bg-surface); border-bottom:1px solid var(--border); }
 .tab-bar button { background:none; border:none; color:var(--text-muted); padding:8px 16px; cursor:pointer; font-size:14px; font-family:var(--font-ui); }
 .tab-bar button.active { color:var(--text); border-bottom:2px solid var(--accent); }
+.notif-badge { display:inline-block; background:#e74c3c; color:#fff; border-radius:50%; min-width:18px; height:18px; font-size:11px; line-height:18px; text-align:center; margin-left:6px; vertical-align:middle; }
 
 /* === Telegram === */
 .tg-layout { display:flex; height:calc(100vh - 38px); }
