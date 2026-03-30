@@ -30,6 +30,14 @@ import requests
 from crypto import derive_key, encrypt, decrypt
 
 try:
+    from browser_handler import handle_browser_request
+    BROWSER_AVAILABLE = True
+except ImportError:
+    BROWSER_AVAILABLE = False
+    def handle_browser_request(request):
+        return {"status": 503, "error": "browser handler not available"}
+
+try:
     from telegram_adapter import TelegramAdapter
     _tg_adapter = None
     def _get_telegram_adapter():
@@ -452,6 +460,8 @@ def dispatch_request(request):
             del _sessions[sid]
             return {"status": 200, "session_id": sid, "user_id": user_id}
         return {"status": 404, "error": f"session {sid} not found", "user_id": user_id}
+    if req_type == "browser":
+        return handle_browser_request(request)
     return {"status": 400, "error": f"unknown type: {req_type}", "user_id": user_id}
 
 
