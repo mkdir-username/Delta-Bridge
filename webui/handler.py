@@ -13,6 +13,9 @@ from transport import imap_conn, send_request, poll_response
 
 log = logging.getLogger("ioe-web")
 
+_TG_ALLOWED_KEYS = {"phone", "code", "password", "chat_id", "text", "limit",
+                     "offset_id", "reply_to_id", "message_id", "folder", "query"}
+
 _auth_attempts = {}
 _AUTH_LIMIT = 3
 _AUTH_WINDOW = 300
@@ -90,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
             login_user_id = phone or "login"
             req = {"id": req_id, "type": "command", "service": "telegram", "action": action, "user_id": login_user_id}
             for key in qs:
-                if key not in ("action", "user_id"):
+                if key in _TG_ALLOWED_KEYS:
                     req[key] = qs[key][0]
             try:
                 m = imap_conn()
@@ -271,7 +274,7 @@ class Handler(BaseHTTPRequestHandler):
                 "user_id": user_id,
             }
             for key in qs:
-                if key not in ("action", "user_id"):
+                if key in _TG_ALLOWED_KEYS:
                     req[key] = qs[key][0]
             if "chat_id" in req:
                 try:
@@ -408,7 +411,7 @@ class Handler(BaseHTTPRequestHandler):
             "user_id": user_id,
         }
         for key in body:
-            if key not in ("action", "user_id"):
+            if key in _TG_ALLOWED_KEYS:
                 req[key] = body[key]
         if "chat_id" in req:
             try:
