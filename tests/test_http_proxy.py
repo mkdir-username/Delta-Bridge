@@ -331,5 +331,38 @@ class TestSessions(unittest.TestCase):
         self.assertIn("new", srv._sessions)
 
 
+class TestUserIdRouting(unittest.TestCase):
+
+    def test_dispatch_session_start_includes_user_id_from_request(self):
+        result = srv.dispatch_request({"type": "session_start", "user_id": "denis"})
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result.get("user_id"), "denis")
+
+    def test_dispatch_default_user_id_when_missing(self):
+        result = srv.dispatch_request({"type": "session_start"})
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result.get("user_id"), "default")
+
+    def test_dispatch_unknown_type_preserves_user_id(self):
+        result = srv.dispatch_request({"type": "banana", "user_id": "alice"})
+        self.assertEqual(result["status"], 400)
+        self.assertEqual(result.get("user_id"), "alice")
+
+    def test_dispatch_http_preserves_user_id(self):
+        with patch.object(srv, "handle_http_proxy", return_value={"status_code": 200}) as mock_h:
+            result = srv.dispatch_request({"type": "http", "url": "https://x.com", "method": "GET", "user_id": "bob"})
+            self.assertEqual(result.get("user_id"), "bob")
+
+    def test_dispatch_session_end_preserves_user_id(self):
+        srv._sessions["test-sid"] = {"session": MagicMock(), "created": time.time()}
+        result = srv.dispatch_request({"type": "session_end", "session_id": "test-sid", "user_id": "carol"})
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result.get("user_id"), "carol")
+
+    def test_dispatch_none_type_returns_none_unchanged(self):
+        result = srv.dispatch_request({"cmd": "GET", "user_id": "denis"})
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()

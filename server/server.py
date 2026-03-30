@@ -50,6 +50,25 @@ logging.basicConfig(
 )
 log = logging.getLogger("ioe")
 
+_tg_listeners_started = set()
+
+
+def _send_tg_notification(notification):
+    try:
+        client = IMAPClient(IMAP_HOST, ssl=True)
+        client.login(EMAIL, PASSWORD)
+        append_response(client, notification)
+        client.logout()
+    except Exception as e:
+        log.error("Failed to send TG notification: %s", e)
+
+
+def _start_telegram_listener(adapter, user_id):
+    if user_id in _tg_listeners_started:
+        return
+    _tg_listeners_started.add(user_id)
+    adapter.start_listener(user_id, _send_tg_notification)
+
 EMAIL = os.environ["EMAIL"]
 PASSWORD = os.environ["IMAP_PASSWORD"]
 IOE_KEY = derive_key(os.environ["IOE_SECRET"])
@@ -404,29 +423,36 @@ def dispatch_request(request):
     req_type = request.get("type")
     if req_type is None:
         return None
+    user_id = request.get("user_id", "default")
     if req_type == "http":
-        return handle_http_proxy(request)
+        result = handle_http_proxy(request)
+        result["user_id"] = user_id
+        return result
     if req_type == "command":
         service = request.get("service", "")
         if service == "telegram":
             adapter = _get_telegram_adapter()
             if adapter is None:
-                return {"status": 503, "error": "telegram not available (telethon not installed)"}
+                return {"status": 503, "error": "telegram not available (telethon not installed)", "user_id": user_id}
             action = request.get("action", "")
-            return adapter.handle(action, request)
-        return {"status": 400, "error": f"unknown service: {service}"}
+            result = adapter.handle(action, request)
+            result["user_id"] = user_id
+            if action == "auth_code" and result.get("auth_status") == "authorized":
+                _start_telegram_listener(adapter, user_id)
+            return result
+        return {"status": 400, "error": f"unknown service: {service}", "user_id": user_id}
     if req_type == "session_start":
         sid = request.get("session_id", uuid.uuid4().hex)
         _sessions[sid] = {"session": requests.Session(), "created": time.time()}
-        return {"status": 200, "session_id": sid}
+        return {"status": 200, "session_id": sid, "user_id": user_id}
     if req_type == "session_end":
         sid = request.get("session_id", "")
         if sid in _sessions:
             _sessions[sid]["session"].close()
             del _sessions[sid]
-            return {"status": 200, "session_id": sid}
-        return {"status": 404, "error": f"session {sid} not found"}
-    return {"status": 400, "error": f"unknown type: {req_type}"}
+            return {"status": 200, "session_id": sid, "user_id": user_id}
+        return {"status": 404, "error": f"session {sid} not found", "user_id": user_id}
+    return {"status": 400, "error": f"unknown type: {req_type}", "user_id": user_id}
 
 
 def process_message(client, uid, raw):
@@ -442,6 +468,7 @@ def process_message(client, uid, raw):
         log.warning("uid=%s: decrypt failed, skipping", uid)
         return False
 
+    user_id = request.get("user_id", "default")
     dispatch_result = dispatch_request(request)
     if dispatch_result is not None:
         req_id = request.get("id", "")
@@ -458,13 +485,13 @@ def process_message(client, uid, raw):
         if cmd == "SEARCH":
             query = request.get("query", "")
             results = do_search(query)
-            append_response(client, {"id": req_id, "status": 200, "results": results})
+            append_response(client, {"id": req_id, "status": 200, "results": results, "user_id": user_id})
         elif cmd == "TEXT":
             url = request.get("url", "")
             text = fetch_text(url)
             if len(text) > MAX_BODY:
                 text = text[:MAX_BODY] + "\n\n[truncated]"
-            append_response(client, {"id": req_id, "status": 200, "body": text})
+            append_response(client, {"id": req_id, "status": 200, "body": text, "user_id": user_id})
         elif cmd == "UPDATE":
             files = {}
             base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -475,6 +502,7 @@ def process_message(client, uid, raw):
                         files[fname] = f.read()
             append_response(client, {
                 "id": req_id, "status": 200, "cmd": "UPDATE", "files": files,
+                "user_id": user_id,
             })
         else:
             url = request.get("url", "")
@@ -487,10 +515,11 @@ def process_message(client, uid, raw):
                 "title": result["title"], "body": body,
                 "format": result["format"], "type": result["type"],
                 "domain": result["domain"], "word_count": result["word_count"],
+                "user_id": user_id,
             })
         log.info("Done uid=%s", uid)
     except Exception as e:
-        append_response(client, {"id": req_id, "status": 500, "error": type(e).__name__})
+        append_response(client, {"id": req_id, "status": 500, "error": type(e).__name__, "user_id": user_id})
         log.error("Failed uid=%s: %s: %s", uid, type(e).__name__, e)
 
     return True
