@@ -112,9 +112,9 @@ def main():
         if arg == "--demo" and i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit():
             port = int(sys.argv[i + 1])
             break
-    from auth import load_whitelist, _whitelist
-    load_whitelist()
-    if not _whitelist:
+    import auth
+    auth.load_whitelist()
+    if not auth._whitelist:
         print("\n" + "=" * 60)
         print("WARNING: WHITELIST EMPTY — no users can log in!")
         print("Add phones to users.json and restart.")
