@@ -84,6 +84,10 @@ def poll_response(req_id):
                 try:
                     decrypted = decrypt(ioe_web.IOE_KEY, att.decode("ascii").strip())
                     response = json.loads(decrypted)
+                    if response.get("type") == "notification":
+                        with ioe_web.lock:
+                            ioe_web.notification_queue.append(response)
+                        continue
                     rid = response.get("id", "")
                     if rid == req_id:
                         elapsed = time.time() - t0
