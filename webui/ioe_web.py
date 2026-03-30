@@ -80,8 +80,13 @@ def main():
         if arg == "--demo" and i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit():
             port = int(sys.argv[i + 1])
             break
-    from auth import load_whitelist
+    from auth import load_whitelist, _whitelist
     load_whitelist()
+    if not _whitelist:
+        print("\n" + "=" * 60)
+        print("WARNING: WHITELIST EMPTY — no users can log in!")
+        print("Add phones to users.json and restart.")
+        print("=" * 60 + "\n")
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(("0.0.0.0", port), Handler)
     mode = " (demo)" if DEMO_MODE else ""

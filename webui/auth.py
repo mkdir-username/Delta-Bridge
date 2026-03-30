@@ -30,6 +30,8 @@ def load_whitelist(path=None):
         with open(_whitelist_path) as f:
             _whitelist = json.load(f)
         log.info("Loaded %d phones from %s", len(_whitelist), _whitelist_path)
+        if not _whitelist:
+            log.error("WHITELIST EMPTY — no users can log in")
     else:
         _whitelist = {}
         log.warning("No users.json at %s", _whitelist_path)
