@@ -85,7 +85,7 @@ function showError(msg) {
 
 function doSearch(query) {
   showLoading('\u0418\u0449\u0443 \u0447\u0435\u0440\u0435\u0437 IMAP...');
-  fetch('/search?q=' + encodeURIComponent(query) + '&user_id=' + encodeURIComponent(userId))
+  fetch('/search?q=' + encodeURIComponent(query))
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.error) { showError(d.error); return; }
@@ -103,8 +103,8 @@ function openPage(url) {
   showLoading('\u0417\u0430\u0433\u0440\u0443\u0436\u0430\u044e...');
   urlInput.value = url;
   var endpoint = browserMode
-    ? '/browser?url=' + encodeURIComponent(url) + '&user_id=' + encodeURIComponent(userId)
-    : '/get?url=' + encodeURIComponent(url) + '&user_id=' + encodeURIComponent(userId);
+    ? '/browser?url=' + encodeURIComponent(url)
+    : '/get?url=' + encodeURIComponent(url);
   fetch(endpoint)
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -275,18 +275,6 @@ function copyMd() {
     navigator.clipboard.writeText(lastMarkdown).then(function() {
       setStatus('Copied!', 'ok');
     });
-  }
-}
-
-var userId = localStorage.getItem('ioe_user_id') || 'default';
-$('userId').textContent = userId;
-
-function promptUserId() {
-  var name = prompt('Your name:', userId);
-  if (name && name.trim()) {
-    userId = name.trim();
-    localStorage.setItem('ioe_user_id', userId);
-    $('userId').textContent = userId;
   }
 }
 

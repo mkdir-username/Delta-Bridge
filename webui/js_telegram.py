@@ -32,7 +32,7 @@ function loadDialogs() {
   var ld = makeLoadingHtml('Loading chats...');
   document.getElementById('tg-chats').innerHTML = ld.html;
   startLoadingTimer(ld.id);
-  fetch('/tg?action=get_dialogs&limit=30&user_id=' + encodeURIComponent(userId))
+  fetch('/tg?action=get_dialogs&limit=30')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
@@ -70,7 +70,10 @@ function pollTgStatus(id, callback) {
             document.getElementById('tg-chats').innerHTML = '<div class="tg-loading">' + escHtml(data.error || 'unknown') + '</div>';
           }
         }
-        if (++attempts > 30) clearInterval(poll);
+        if (++attempts > 30) {
+          clearInterval(poll);
+          if (typeof showAuthWizard === 'function') showAuthWizard();
+        }
       });
   }, 2000);
 }
@@ -162,13 +165,13 @@ function openChat(chatId, el) {
   startLoadingTimer(ld.id);
   cancelReply();
   renderFilteredDialogs();
-  fetch('/tg?action=get_messages&chat_id=' + chatId + '&limit=30&user_id=' + encodeURIComponent(userId))
+  fetch('/tg?action=get_messages&chat_id=' + chatId + '&limit=30')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') pollTgStatus(data.id, renderMessages);
       else if (data.messages) renderMessages(data);
     });
-  fetch('/tg?action=mark_read&chat_id=' + chatId + '&user_id=' + encodeURIComponent(userId));
+  fetch('/tg?action=mark_read&chat_id=' + chatId);
 }
 
 function formatMsgDate(iso) {
@@ -235,9 +238,9 @@ function sendTgMessage() {
 
   var url;
   if (replyToId) {
-    url = '/tg?action=reply&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text) + '&reply_to_id=' + replyToId + '&user_id=' + encodeURIComponent(userId);
+    url = '/tg?action=reply&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text) + '&reply_to_id=' + replyToId;
   } else {
-    url = '/tg?action=send_message&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text) + '&user_id=' + encodeURIComponent(userId);
+    url = '/tg?action=send_message&chat_id=' + currentChatId + '&text=' + encodeURIComponent(text);
   }
 
   fetch(url).then(function(r) { return r.json(); }).then(function(data) {
@@ -277,7 +280,7 @@ function checkTgAuth() {
   var ld = makeLoadingHtml('Проверка авторизации...');
   document.getElementById('tg-chats').innerHTML = ld.html;
   startLoadingTimer(ld.id);
-  fetch('/tg?action=check_auth&user_id=' + encodeURIComponent(userId))
+  fetch('/tg?action=check_auth')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
@@ -391,7 +394,7 @@ function auth2FA() {
   var btn = document.querySelector('#auth-step-2fa .auth-btn');
   btn.textContent = '...';
   document.getElementById('auth-2fa-error').textContent = '';
-  fetch('/tg?action=auth_code&password=' + encodeURIComponent(pw))
+  fetch('/tg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'auth_code', password:pw})})
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
