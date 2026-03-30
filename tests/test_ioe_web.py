@@ -16,8 +16,20 @@ os.environ.setdefault("IMAP_PASSWORD", "pass")
 os.environ.setdefault("IOE_SECRET", "secret123")
 
 
+import auth
 import handler
 import transport
+
+TEST_USER = "testuser"
+_real_get_auth = auth.get_authenticated_user
+
+
+def setup_module(module):
+    auth.get_authenticated_user = lambda cookie_header: TEST_USER
+
+
+def teardown_module(module):
+    auth.get_authenticated_user = _real_get_auth
 
 
 def get_html():
@@ -155,7 +167,7 @@ class TestEndpoints:
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         test_results = [{"title": "Test", "href": "https://test.com", "snippet": "Desc"}]
         with ioe_web.lock:
-            ioe_web.pending["test123"] = {"id": "test123", "status": 200, "results": test_results}
+            ioe_web.pending[(TEST_USER, "test123")] = {"id": "test123", "status": 200, "results": test_results}
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
         resp = urlopen("http://127.0.0.1:{}/status?id=test123".format(port), timeout=5)
@@ -169,7 +181,7 @@ class TestEndpoints:
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         with ioe_web.lock:
-            ioe_web.pending["page123"] = {"id": "page123", "status": 200, "title": "Page", "body": "<p>Content</p>"}
+            ioe_web.pending[(TEST_USER, "page123")] = {"id": "page123", "status": 200, "title": "Page", "body": "<p>Content</p>"}
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
         resp = urlopen("http://127.0.0.1:{}/status?id=page123".format(port), timeout=5)
@@ -220,7 +232,7 @@ class TestStatusEndpoint:
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         with ioe_web.lock:
-            ioe_web.pending["fmt123"] = {
+            ioe_web.pending[(TEST_USER, "fmt123")] = {
                 "id": "fmt123", "status": 200,
                 "title": "T", "body": "B", "format": "markdown",
             }
@@ -236,7 +248,7 @@ class TestStatusEndpoint:
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         with ioe_web.lock:
-            ioe_web.pending["err123"] = {
+            ioe_web.pending[(TEST_USER, "err123")] = {
                 "id": "err123", "status": 500, "error": "HTTPError",
             }
         t = threading.Thread(target=server.handle_request, daemon=True)
@@ -252,7 +264,7 @@ class TestStatusEndpoint:
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         with ioe_web.lock:
-            ioe_web.pending["nofmt"] = {
+            ioe_web.pending[(TEST_USER, "nofmt")] = {
                 "id": "nofmt", "status": 200,
                 "title": "T", "body": "<p>B</p>",
             }
@@ -329,31 +341,21 @@ class TestDemoFormatField:
 
 
 class TestUserIdInRequests:
-    def test_user_id_default(self):
-        import ioe_web
-        assert hasattr(ioe_web, 'USER_ID')
-        assert isinstance(ioe_web.USER_ID, str)
-
-    def test_search_request_includes_user_id(self):
+    def test_user_id_from_auth_session(self):
         import ioe_web
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
         def capture_send(m, req):
             sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "test_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/search?q=test".format(port), timeout=5)
-            assert sent_data.get("user_id") == "test_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
+        with patch.object(handler, 'imap_conn') as mock_conn, \
+             patch.object(handler, 'send_request', side_effect=capture_send):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            urlopen("http://127.0.0.1:{}/search?q=test".format(port), timeout=5)
+        assert sent_data.get("user_id") == TEST_USER
+        server.server_close()
 
     def test_get_request_includes_user_id(self):
         import ioe_web
@@ -362,19 +364,14 @@ class TestUserIdInRequests:
         sent_data = {}
         def capture_send(m, req):
             sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "test_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/get?url=https://example.com".format(port), timeout=5)
-            assert sent_data.get("user_id") == "test_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
+        with patch.object(handler, 'imap_conn') as mock_conn, \
+             patch.object(handler, 'send_request', side_effect=capture_send):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            urlopen("http://127.0.0.1:{}/get?url=https://example.com".format(port), timeout=5)
+        assert sent_data.get("user_id") == TEST_USER
+        server.server_close()
 
     def test_proxy_request_includes_user_id(self):
         import ioe_web
@@ -383,103 +380,14 @@ class TestUserIdInRequests:
         sent_data = {}
         def capture_send(m, req):
             sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "test_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/proxy?method=GET&url=https://example.com".format(port), timeout=5)
-            assert sent_data.get("user_id") == "test_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
-
-    def test_search_user_id_from_query_param(self):
-        import ioe_web
-        port = get_free_port()
-        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        sent_data = {}
-        def capture_send(m, req):
-            sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "env_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/search?q=test&user_id=web_user".format(port), timeout=5)
-            assert sent_data.get("user_id") == "web_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
-
-    def test_get_user_id_from_query_param(self):
-        import ioe_web
-        port = get_free_port()
-        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        sent_data = {}
-        def capture_send(m, req):
-            sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "env_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/get?url=https://example.com&user_id=web_user".format(port), timeout=5)
-            assert sent_data.get("user_id") == "web_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
-
-    def test_proxy_user_id_from_query_param(self):
-        import ioe_web
-        port = get_free_port()
-        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        sent_data = {}
-        def capture_send(m, req):
-            sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "env_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/proxy?method=GET&url=https://example.com&user_id=web_user".format(port), timeout=5)
-            assert sent_data.get("user_id") == "web_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
-
-    def test_tg_user_id_from_query_param(self):
-        import ioe_web
-        port = get_free_port()
-        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        sent_data = {}
-        def capture_send(m, req):
-            sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "env_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/tg?action=get_dialogs&user_id=web_user".format(port), timeout=5)
-            assert sent_data.get("user_id") == "web_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
+        with patch.object(handler, 'imap_conn') as mock_conn, \
+             patch.object(handler, 'send_request', side_effect=capture_send):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            urlopen("http://127.0.0.1:{}/proxy?method=GET&url=https://example.com".format(port), timeout=5)
+        assert sent_data.get("user_id") == TEST_USER
+        server.server_close()
 
     def test_tg_request_includes_user_id(self):
         import ioe_web
@@ -488,30 +396,25 @@ class TestUserIdInRequests:
         sent_data = {}
         def capture_send(m, req):
             sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "test_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/tg?action=get_dialogs".format(port), timeout=5)
-            assert sent_data.get("user_id") == "test_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
+        with patch.object(handler, 'imap_conn') as mock_conn, \
+             patch.object(handler, 'send_request', side_effect=capture_send):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            urlopen("http://127.0.0.1:{}/tg?action=get_dialogs".format(port), timeout=5)
+        assert sent_data.get("user_id") == TEST_USER
+        server.server_close()
 
 
 class TestNotifications:
-    def test_notification_queue_exists(self):
+    def test_notification_queues_exists(self):
         import ioe_web
-        assert hasattr(ioe_web, 'notification_queue')
-        assert isinstance(ioe_web.notification_queue, list)
+        assert hasattr(ioe_web, 'notification_queues')
+        assert isinstance(ioe_web.notification_queues, dict)
 
     def test_notifications_endpoint_returns_empty(self):
         import ioe_web
-        ioe_web.notification_queue.clear()
+        ioe_web.notification_queues[TEST_USER] = []
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
@@ -523,9 +426,9 @@ class TestNotifications:
 
     def test_notifications_endpoint_returns_and_clears(self):
         import ioe_web
-        ioe_web.notification_queue.clear()
+        ioe_web.notification_queues[TEST_USER] = []
         with ioe_web.lock:
-            ioe_web.notification_queue.append({"type": "notification", "service": "telegram", "text": "hello"})
+            ioe_web.notification_queues.setdefault(TEST_USER, []).append({"type": "notification", "service": "telegram", "text": "hello"})
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
@@ -535,12 +438,12 @@ class TestNotifications:
         assert len(data["notifications"]) == 1
         assert data["notifications"][0]["text"] == "hello"
         with ioe_web.lock:
-            assert len(ioe_web.notification_queue) == 0
+            assert len(ioe_web.notification_queues.get(TEST_USER, [])) == 0
         server.server_close()
 
     def test_poll_response_captures_notification(self):
         import ioe_web
-        ioe_web.notification_queue.clear()
+        ioe_web.notification_queues[TEST_USER] = []
         notif_msg = {"type": "notification", "service": "telegram", "text": "new msg"}
         normal_resp = {"id": "req123", "status": 200, "body": "ok"}
 
@@ -572,16 +475,16 @@ class TestNotifications:
 
         with patch.object(transport, 'imap_conn', return_value=mock_imap), \
              patch('time.sleep'):
-            poll_thread = threading.Thread(target=transport.poll_response, args=("req123",), daemon=True)
+            poll_thread = threading.Thread(target=transport.poll_response, args=(TEST_USER, "req123"), daemon=True)
             poll_thread.start()
             poll_thread.join(timeout=10)
 
         with ioe_web.lock:
-            assert len(ioe_web.notification_queue) == 1
-            assert ioe_web.notification_queue[0]["text"] == "new msg"
-            assert "req123" in ioe_web.pending
-        ioe_web.notification_queue.clear()
-        ioe_web.pending.pop("req123", None)
+            assert len(ioe_web.notification_queues.get(TEST_USER, [])) == 1
+            assert ioe_web.notification_queues[TEST_USER][0]["text"] == "new msg"
+            assert (TEST_USER, "req123") in ioe_web.pending
+        ioe_web.notification_queues[TEST_USER] = []
+        ioe_web.pending.pop((TEST_USER, "req123"), None)
 
 
 class TestKitEndpoint:
@@ -686,16 +589,11 @@ class TestBrowserMode:
         sent_data = {}
         def capture_send(m, req):
             sent_data.update(req)
-        old_uid = ioe_web.USER_ID
-        ioe_web.USER_ID = "test_user"
-        try:
-            with patch.object(handler, 'imap_conn') as mock_conn, \
-                 patch.object(handler, 'send_request', side_effect=capture_send):
-                mock_conn.return_value = MagicMock()
-                t = threading.Thread(target=server.handle_request, daemon=True)
-                t.start()
-                urlopen("http://127.0.0.1:{}/browser?url=https://example.com&user_id=web_user".format(port), timeout=5)
-            assert sent_data.get("user_id") == "web_user"
-        finally:
-            ioe_web.USER_ID = old_uid
-            server.server_close()
+        with patch.object(handler, 'imap_conn') as mock_conn, \
+             patch.object(handler, 'send_request', side_effect=capture_send):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            urlopen("http://127.0.0.1:{}/browser?url=https://example.com".format(port), timeout=5)
+        assert sent_data.get("user_id") == TEST_USER
+        server.server_close()
