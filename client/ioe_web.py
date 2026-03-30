@@ -42,8 +42,15 @@ BODIES = ["", "см. вложение", "Документ"]
 
 DEMO_MODE = "--demo" in sys.argv
 
+import hashlib as _hashlib
+_device_seed = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
+    os.environ.get("USER", "cli"), os.uname().nodename)
+DEVICE_ID = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
+
 pending = {}
 lock = threading.Lock()
+notification_queues = {}
+seen_notification_uids = set()
 
 
 def imap_conn():
@@ -108,10 +115,23 @@ def poll_response(req_id):
                 try:
                     decrypted = decrypt(IOE_KEY, att.decode("ascii").strip())
                     response = json.loads(decrypted)
+                    if response.get("type") == "notification":
+                        uid_key = uid.decode() if isinstance(uid, bytes) else str(uid)
+                        with lock:
+                            if uid_key in seen_notification_uids:
+                                continue
+                            seen_notification_uids.add(uid_key)
+                            notification_queues.setdefault("default", []).append(response)
+                        continue
                     rid = response.get("id", "")
                     if rid == req_id:
                         elapsed = time.time() - t0
                         log.info("[%s] poll: FOUND response (%.1fs, status=%s)", req_id, elapsed, response.get("status"))
+                        try:
+                            m.store(uid, "+FLAGS", "\\Deleted")
+                            m.expunge()
+                        except Exception:
+                            pass
                         with lock:
                             pending[req_id] = response
                         m.logout()
@@ -121,6 +141,17 @@ def poll_response(req_id):
                     continue
             if cycle % 5 == 4:
                 log.debug("[%s] poll: cycle %d, %.0fs elapsed, %d uids checked", req_id, cycle, time.time() - t0, len(seen_uids))
+            if cycle % 10 == 9:
+                from datetime import datetime, timedelta
+                cutoff = (datetime.utcnow() - timedelta(minutes=5)).strftime("%d-%b-%Y")
+                try:
+                    _, old = m.search(None, "BEFORE", cutoff)
+                    if old[0]:
+                        for old_uid in old[0].split():
+                            m.store(old_uid, "+FLAGS", "\\Deleted")
+                        m.expunge()
+                except Exception:
+                    pass
         elapsed = time.time() - t0
         log.warning("[%s] poll: TIMEOUT after %.0fs", req_id, elapsed)
         with lock:
@@ -1056,7 +1087,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path in ("/get", "/text", "/search"):
-            req_id = uuid.uuid4().hex[:8]
+            req_id = "{}-{}".format(DEVICE_ID, uuid.uuid4().hex[:6])
             cmd = parsed.path.lstrip("/").upper()
 
             if DEMO_MODE:
