@@ -20,9 +20,18 @@ log = logging.getLogger("ioe-web")
 
 def imap_conn():
     import ioe_web
-    m = imaplib.IMAP4_SSL(ioe_web.IMAP_HOST, 993)
-    m.login(ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
-    return m
+    last_err = None
+    for attempt in range(3):
+        try:
+            m = imaplib.IMAP4_SSL(ioe_web.IMAP_HOST, 993)
+            m.login(ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
+            return m
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                log.warning("IMAP login attempt %d failed: %s", attempt + 1, e)
+                time.sleep(2)
+    raise last_err
 
 
 def send_request(m, request_dict):
@@ -102,6 +111,9 @@ def poll_response(user_id, req_id):
                             m.expunge()
                         except Exception:
                             pass
+                        if "error" in response:
+                            from handler import _humanize_error
+                            response["error"] = _humanize_error(response["error"])
                         with ioe_web.lock:
                             ioe_web.pending[(user_id, req_id)] = response
                         m.logout()
