@@ -5,6 +5,9 @@ var browserMode = false;
 function toggleBrowserMode() {
   browserMode = !browserMode;
   $('btnBrowser').classList.toggle('active', browserMode);
+  var val = urlInput.value.trim();
+  var isUrl = val.indexOf('http') === 0 || (val.indexOf('.') > -1 && val.indexOf(' ') === -1 && /\.[a-zA-Z]{2,}/.test(val));
+  if (isUrl && !busy) openPage(val);
 }
 
 if (typeof marked !== 'undefined') {
@@ -90,9 +93,10 @@ function doSearch(query) {
     .then(function(d) {
       if (d.error) { showError(d.error); return; }
       if (d.status === 'pending') {
-        startPoll(d.id, function(resp) { renderResults(query, resp.results || []); });
+        startPoll(d.id, function(resp) { renderResults(query, resp.results || []); pushSearchState(query, resp.results || []); });
       } else if (d.results) {
         renderResults(query, d.results);
+        pushSearchState(query, d.results);
         doneLoading();
       }
     })
@@ -110,9 +114,10 @@ function openPage(url) {
     .then(function(d) {
       if (d.error) { showError(d.error); return; }
       if (d.status === 'pending') {
-        startPoll(d.id, function(resp) { showReader(url, resp); });
+        startPoll(d.id, function(resp) { showReader(url, resp); pushPageState(url); });
       } else {
         showReader(url, d);
+        pushPageState(url);
         doneLoading();
       }
     })
@@ -157,6 +162,32 @@ function renderResults(query, results) {
   window.scrollTo(0, 0);
 }
 
+function pushSearchState(query, results) {
+  history.pushState({type:'search', query:query, results:results}, '', '?q=' + encodeURIComponent(query));
+}
+
+function pushPageState(url) {
+  history.pushState({type:'page', url:url, browserMode:browserMode}, '', '?url=' + encodeURIComponent(url));
+}
+
+window.onpopstate = function(e) {
+  var s = e.state;
+  if (!s) {
+    content.innerHTML = '<div class="empty"><div class="logo">&#9889;</div><div class="title">IoE</div><div class="sub">internet over email</div></div>';
+    urlInput.value = '';
+    return;
+  }
+  if (s.type === 'search') {
+    lastResults = {query: s.query, results: s.results};
+    renderResults(s.query, s.results);
+    doneLoading();
+  } else if (s.type === 'page') {
+    browserMode = !!s.browserMode;
+    $('btnBrowser').classList.toggle('active', browserMode);
+    openPage(s.url);
+  }
+};
+
 function showReader(url, data) {
   var title = data.title || '';
   var body = data.body || '';
@@ -164,9 +195,7 @@ function showReader(url, data) {
   var elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   var domain = '';
   try { domain = new URL(url).hostname; } catch(e) { domain = url; }
-  var backHtml = lastResults
-    ? '<button class="back-btn" onclick="renderResults(\'' + escAttr(lastResults.query) + '\', lastResults.results)">\u2190 \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\u044b</button>'
-    : '<button class="back-btn" onclick="history.back()">\u2190 \u043d\u0430\u0437\u0430\u0434</button>';
+  var backHtml = '<button class="back-btn" onclick="history.back()">\u2190 \u043d\u0430\u0437\u0430\u0434</button>';
 
   var bodyContent;
   lastMarkdown = '';

@@ -294,7 +294,9 @@ function checkTgAuth() {
         showAuthWizard();
       }
     })
-    .catch(function() { showAuthWizard(); });
+    .catch(function() {
+      document.getElementById('tg-chats').innerHTML = '<div style="padding:24px;color:var(--text-dim);text-align:center">Нет связи с сервером<br><button class="auth-btn" onclick="checkTgAuth()" style="margin-top:12px">Повторить</button></div>';
+    });
 }
 
 function showAuthWizard() {

