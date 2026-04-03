@@ -27,7 +27,7 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Aria
 
   <div id="step-phone" class="login-form">
     <div class="login-hint">Авторизация через Telegram</div>
-    <input type="tel" id="phone" placeholder="+7XXXXXXXXXX"
+    <input type="tel" id="phone" placeholder="+7XXXXXXXXXX" value="+7"
            onkeydown="if(event.key===\'Enter\')authStart()">
     <button onclick="authStart()">Войти через Telegram</button>
     <div id="phone-error" class="login-error"></div>
@@ -252,7 +252,7 @@ HTML_TELEGRAM = """<div id="telegram-view" style="display:none">
         <div id="auth-step-phone" class="auth-step">
           <div class="auth-title">Telegram</div>
           <div class="auth-hint">Код придёт в SMS, доступ к TG не нужен</div>
-          <input type="tel" id="auth-phone" placeholder="+7XXXXXXXXXX" class="tg-search"
+          <input type="tel" id="auth-phone" placeholder="+7XXXXXXXXXX" value="+7" class="tg-search"
                  onkeydown="if(event.key==='Enter')authStart()">
           <button onclick="authStart()" class="auth-btn">Отправить код</button>
           <div id="auth-phone-error" class="auth-error"></div>
