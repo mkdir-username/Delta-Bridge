@@ -1,6 +1,7 @@
 """IoE HTTP request handler."""
 import json
 import os
+import re as _re
 import uuid
 import secrets
 import time
@@ -13,6 +14,27 @@ import auth
 from transport import imap_conn, send_request, poll_response
 
 log = logging.getLogger("ioe-web")
+
+_ERROR_MAP = [
+    (_re.compile(r"UNAVAILABLE", _re.I), "Сервер почты недоступен, попробуйте позже"),
+    (_re.compile(r"all available options.*already used", _re.I), "Слишком много попыток. Подождите 10 минут"),
+    (_re.compile(r"phone number is invalid", _re.I), "Неверный номер телефона"),
+    (_re.compile(r"session expired", _re.I), "Сессия истекла, войдите заново"),
+    (_re.compile(r"wait of (\d+) seconds", _re.I), None),
+]
+
+
+def _humanize_error(raw):
+    s = str(raw)
+    for pattern, msg in _ERROR_MAP:
+        m = pattern.search(s)
+        if m:
+            if msg is None:
+                secs = int(m.group(1))
+                mins = max(1, secs // 60)
+                return f"Подождите {mins} мин"
+            return msg
+    return "Ошибка сервера, попробуйте позже"
 
 _TG_ALLOWED_KEYS = {"phone", "code", "password", "chat_id", "text", "limit",
                      "offset_id", "reply_to_id", "message_id", "folder", "query"}
@@ -182,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("[%s] send: done (%.1fs)", req_id, time.time() - t0)
             except Exception as e:
                 log.error("[%s] send: FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": "internal error"})
+                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
                 return
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
             t.start()
@@ -225,7 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] proxy send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": "internal error"})
+                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -270,7 +292,7 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] tg send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": "internal error"})
+                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -328,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] browser send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": "internal error"})
+                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -415,7 +437,7 @@ class Handler(BaseHTTPRequestHandler):
             m.logout()
         except Exception as e:
             log.error("[%s] login/tg send FAILED: %s", req_id, e)
-            self.respond_json({"status": "error", "error": "internal error"})
+            self.respond_json({"status": "error", "error": _humanize_error(str(e))})
             return
 
         _login_request_owners[req_id] = login_user_id
@@ -502,7 +524,7 @@ class Handler(BaseHTTPRequestHandler):
             m.logout()
         except Exception as e:
             log.error("[%s] tg POST send FAILED: %s", req_id, e)
-            self.respond_json({"status": "error", "error": "internal error"})
+            self.respond_json({"status": "error", "error": _humanize_error(str(e))})
             return
 
         t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)

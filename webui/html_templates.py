@@ -107,11 +107,20 @@ function authStart() {{
         if (resp.auth_status === \'code_required\' || resp.status === \'ready\') {{
           showStep(\'code\');
           document.getElementById(\'code\').focus();
+        }} else if (resp.auth_status === \'flood_wait\') {{
+          showStep(\'phone\');
+          var mins = Math.ceil((resp.seconds || 60) / 60);
+          document.getElementById(\'phone-error\').textContent = \'Подождите \' + mins + \' мин\';
         }} else {{
           showStep(\'phone\');
           document.getElementById(\'phone-error\').textContent = resp.error || \'Ошибка\';
         }}
       }});
+    }})
+    .catch(function() {{
+      stopLoading();
+      showStep(\'phone\');
+      document.getElementById(\'phone-error\').textContent = \'Нет связи с сервером\';
     }});
 }}
 
@@ -143,6 +152,11 @@ function authCode() {{
           document.getElementById(\'code-error\').textContent = resp.error || \'Неверный код\';
         }}
       }});
+    }})
+    .catch(function() {{
+      stopLoading();
+      showStep(\'code\');
+      document.getElementById(\'code-error\').textContent = \'Нет связи с сервером\';
     }});
 }}
 
@@ -171,6 +185,11 @@ function auth2FA() {{
           document.getElementById(\'2fa-error\').textContent = resp.error || \'Неверный пароль\';
         }}
       }});
+    }})
+    .catch(function() {{
+      stopLoading();
+      showStep(\'2fa\');
+      document.getElementById(\'2fa-error\').textContent = \'Нет связи с сервером\';
     }});
 }}
 
