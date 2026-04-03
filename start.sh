@@ -7,6 +7,23 @@ PORT="${1:-8080}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE=""
 
+# Auto-update from git if available
+if [ -d "$DIR/.git" ]; then
+  echo "Checking for updates..."
+  cd "$DIR"
+  if git fetch origin main --quiet 2>/dev/null; then
+    LOCAL=$(git rev-parse HEAD 2>/dev/null)
+    REMOTE=$(git rev-parse origin/main 2>/dev/null)
+    if [ "$LOCAL" != "$REMOTE" ]; then
+      echo "Updating $(git log --oneline "$LOCAL".."$REMOTE" | wc -l | tr -d ' ') commits..."
+      git reset --hard origin/main --quiet 2>/dev/null
+      echo "Updated to $(git log -1 --format='%h %s')"
+    else
+      echo "Already up to date."
+    fi
+  fi
+fi
+
 # Find .env file
 for f in "$DIR/.env" "$DIR/webui/.env" "$HOME/.ioe.env"; do
   [ -f "$f" ] && ENV_FILE="$f" && break
