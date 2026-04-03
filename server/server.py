@@ -28,7 +28,7 @@ from readability import Document
 from PIL import Image
 import requests
 
-from crypto import derive_key, encrypt, decrypt
+from crypto import derive_key, encrypt, decrypt, compress_encrypt, decrypt_decompress
 
 try:
     from browser_handler import handle_browser_request
@@ -477,11 +477,60 @@ def handle_http_proxy(request):
         return {"type": "http_response", "status_code": 502, "error": str(e)}
 
 
+CLAUDE_PROXY_TIMEOUT = 300
+CLAUDE_DEFAULT_HOST = "api.anthropic.com"
+
+_claude_session = None
+
+def _get_claude_session():
+    global _claude_session
+    if _claude_session is None:
+        _claude_session = requests.Session()
+    return _claude_session
+
+
+def handle_claude_proxy(request):
+    http_req = request.get("http_request", {})
+    method = http_req.get("method", "GET").upper()
+    path = http_req.get("path", "/")
+    headers = http_req.get("headers", {})
+    body = http_req.get("body")
+
+    host = headers.get("host", CLAUDE_DEFAULT_HOST)
+    if host in ("localhost", "127.0.0.1") or host.startswith("localhost:"):
+        host = CLAUDE_DEFAULT_HOST
+    url = "https://{}{}".format(host, path)
+
+    req_headers = {k: v for k, v in headers.items() if k.lower() != "host"}
+
+    try:
+        kwargs = {"headers": req_headers, "timeout": CLAUDE_PROXY_TIMEOUT, "allow_redirects": True}
+        if body and method in ("POST", "PUT", "PATCH"):
+            kwargs["data"] = body.encode("utf-8") if isinstance(body, str) else body
+        resp = _get_claude_session().request(method, url, **kwargs)
+        return {
+            "type": "claude_proxy_response",
+            "http_response": {
+                "status_code": resp.status_code,
+                "headers": dict(resp.headers),
+                "body": resp.text,
+            },
+        }
+    except (requests.Timeout, TimeoutError):
+        return {"type": "claude_proxy_response", "http_response": {"status_code": 504, "headers": {}, "body": "upstream timeout"}}
+    except Exception as e:
+        return {"type": "claude_proxy_response", "http_response": {"status_code": 502, "headers": {}, "body": str(e)}}
+
+
 def dispatch_request(request):
     req_type = request.get("type")
     if req_type is None:
         return None
     user_id = request.get("user_id", "default")
+    if req_type == "claude_proxy":
+        result = handle_claude_proxy(request)
+        result["user_id"] = user_id
+        return result
     if req_type == "http":
         result = handle_http_proxy(request)
         result["user_id"] = user_id
@@ -526,17 +575,29 @@ def process_message(client, uid, raw):
         return False
 
     try:
-        decrypted = decrypt(IOE_KEY, payload.decode("ascii").strip())
+        blob = payload.decode("ascii").strip()
+        try:
+            decrypted = decrypt_decompress(IOE_KEY, blob)
+        except Exception:
+            decrypted = decrypt(IOE_KEY, blob)
         request = json.loads(decrypted)
     except Exception:
         log.warning("uid=%s: decrypt failed, skipping", uid)
         return False
 
     user_id = request.get("user_id", "default")
+    req_type = request.get("type")
     dispatch_result = dispatch_request(request)
     if dispatch_result is not None:
         req_id = request.get("id", "")
-        append_response(client, {"id": req_id, **dispatch_result})
+        response_dict = {"id": req_id, **dispatch_result}
+        if req_type == "claude_proxy":
+            resp_json = json.dumps(response_dict, ensure_ascii=False)
+            encrypted = compress_encrypt(IOE_KEY, resp_json).encode("ascii")
+            msg = make_envelope(encrypted)
+            client.append("INBOX", msg.as_bytes())
+        else:
+            append_response(client, response_dict)
         log.info("Done uid=%s (type=%s)", uid, request.get("type"))
         _processed_uids.add(uid)
         if len(_processed_uids) > _MAX_PROCESSED:
@@ -630,7 +691,7 @@ def main():
                             client.delete_messages([uid])
                             client.expunge()
                             log.info("Deleted uid=%s from queue", uid)
-                    time.sleep(1)
+                    time.sleep(0.5)
         except Exception as e:
             log.error("Connection error: %s, reconnecting in 5s", e)
             time.sleep(5)

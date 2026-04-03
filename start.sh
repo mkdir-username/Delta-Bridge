@@ -65,6 +65,25 @@ if [ ! -f "$WEBDIR/crypto.py" ]; then
   done
 fi
 
+# Claude proxy mode
+if [ "$1" = "--claude" ] || [ "$1" = "claude" ]; then
+  CLAUDE_PORT="${2:-8090}"
+  PROXY="$DIR/client/claude_proxy.py"
+  [ -f "$PROXY" ] || { echo "claude_proxy.py not found"; exit 1; }
+
+  if [ ! -f "$DIR/client/crypto.py" ]; then
+    cp "$DIR/server/crypto.py" "$DIR/client/crypto.py"
+  fi
+
+  pkill -f "claude_proxy.py" 2>/dev/null || true
+  sleep 1
+
+  echo "Starting Claude IoE proxy on http://localhost:$CLAUDE_PORT"
+  echo "Usage: ANTHROPIC_BASE_URL=http://localhost:$CLAUDE_PORT claude"
+  cd "$DIR/client"
+  exec python3 claude_proxy.py
+fi
+
 # Kill previous instance
 pkill -f "ioe_web.py $PORT" 2>/dev/null || true
 sleep 1
