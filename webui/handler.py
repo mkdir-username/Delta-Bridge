@@ -88,8 +88,9 @@ class Handler(BaseHTTPRequestHandler):
                     resp = ioe_web.pending.pop((login_user_id, req_id))
                     result = {"status": "ready"}
                     for key in resp:
-                        if key != "id":
-                            result[key] = resp[key]
+                        if key in ("id", "status"):
+                            continue
+                        result[key] = resp[key]
                     if result.get("auth_status") == "authorized":
                         sid = auth.create_session(login_user_id)
                         result["set_session"] = True

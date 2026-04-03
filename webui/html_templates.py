@@ -104,7 +104,7 @@ function authStart() {{
       pollCount = 0;
       pollStatus(function(resp) {{
         stopLoading();
-        if (resp.auth_status === \'code_needed\' || resp.status === \'ready\') {{
+        if (resp.auth_status === \'code_required\' || resp.status === \'ready\') {{
           showStep(\'code\');
           document.getElementById(\'code\').focus();
         }} else {{
@@ -135,7 +135,7 @@ function authCode() {{
         stopLoading();
         if (resp.auth_status === \'authorized\' && resp.set_session) {{
           window.location.href = \'/\';
-        }} else if (resp.auth_status === \'2fa_needed\') {{
+        }} else if (resp.auth_status === \'2fa_required\') {{
           showStep(\'2fa\');
           document.getElementById(\'password2fa\').focus();
         }} else {{
