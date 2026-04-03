@@ -23,9 +23,12 @@ function startLoadingTimer(timerId) {
 function switchTab(tab) {
   document.getElementById('browser-view').style.display = tab === 'browser' ? '' : 'none';
   document.getElementById('telegram-view').style.display = tab === 'telegram' ? '' : 'none';
+  document.getElementById('claude-view').style.display = tab === 'claude' ? '' : 'none';
   document.getElementById('tab-browser').className = tab === 'browser' ? 'tab active' : 'tab';
   document.getElementById('tab-telegram').className = tab === 'telegram' ? 'tab active' : 'tab';
+  document.getElementById('tab-claude').className = tab === 'claude' ? 'tab active' : 'tab';
   if (tab === 'telegram') { checkTgAuth(); notifCount = 0; var b = document.getElementById('notif-badge'); if (b) b.style.display = 'none'; }
+  if (tab === 'claude' && !claudeAuthorized) { checkClaudeAuth(); }
 }
 
 function loadDialogs() {

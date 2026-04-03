@@ -52,6 +52,12 @@ except ImportError:
     def _get_telegram_adapter():
         return None
 
+try:
+    from claude_chat import ClaudeChat
+    _claude_chat = ClaudeChat()
+except ImportError:
+    _claude_chat = None
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -522,6 +528,20 @@ def handle_claude_proxy(request):
         return {"type": "claude_proxy_response", "http_response": {"status_code": 502, "headers": {}, "body": str(e)}}
 
 
+def handle_claude_chat(request):
+    if _claude_chat is None:
+        return {"status": 503, "error": "claude CLI not available"}
+    action = request.get("action", "")
+    user_id = request.get("user_id", "default")
+    if action == "send":
+        return _claude_chat.send_message(user_id, request.get("text", ""), request.get("model"))
+    elif action == "check_auth":
+        return _claude_chat.check_auth()
+    elif action == "new_conversation":
+        return _claude_chat.new_conversation(user_id)
+    return {"status": 400, "error": "unknown action: {}".format(action)}
+
+
 def dispatch_request(request):
     req_type = request.get("type")
     if req_type is None:
@@ -548,6 +568,10 @@ def dispatch_request(request):
                 _start_telegram_listener(adapter, user_id)
             return result
         return {"status": 400, "error": f"unknown service: {service}", "user_id": user_id}
+    if req_type == "claude_chat":
+        result = handle_claude_chat(request)
+        result["user_id"] = user_id
+        return result
     if req_type == "session_start":
         sid = request.get("session_id", uuid.uuid4().hex)
         _sessions[sid] = {"session": requests.Session(), "created": time.time()}

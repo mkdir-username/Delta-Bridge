@@ -300,6 +300,38 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"id": req_id, "status": "pending"})
             return
 
+        if parsed.path == "/claude":
+            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+            action = qs.get("action", [""])[0]
+            text = qs.get("text", [""])[0]
+            model = qs.get("model", [""])[0]
+
+            req = {
+                "id": req_id,
+                "type": "claude_chat",
+                "action": action,
+                "user_id": user_id,
+            }
+            if text:
+                req["text"] = text
+            if model:
+                req["model"] = model
+
+            try:
+                log.info("[%s] claude: %s", req_id, action)
+                m = imap_conn()
+                send_request(m, req)
+                m.logout()
+            except Exception as e:
+                log.error("[%s] claude send FAILED: %s", req_id, e)
+                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                return
+
+            t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
+            t.start()
+            self.respond_json({"id": req_id, "status": "pending"})
+            return
+
         if parsed.path == "/notifications":
             with ioe_web.lock:
                 notifs = list(ioe_web.notification_queues.get(user_id, []))

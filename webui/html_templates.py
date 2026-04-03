@@ -264,6 +264,7 @@ function pollStatus(callback) {{
 HTML_TAB_BAR = """<div class="tab-bar">
   <button class="tab active" onclick="switchTab('browser')" id="tab-browser">Browser</button>
   <button class="tab" onclick="switchTab('telegram')" id="tab-telegram">Telegram<span class="notif-badge" id="notif-badge" style="display:none"></span></button>
+  <button class="tab" onclick="switchTab('claude')" id="tab-claude">Claude</button>
 </div>
 """
 
@@ -355,4 +356,37 @@ HTML_TELEGRAM = """<div id="telegram-view" style="display:none">
   </div>
 </div>
 
+"""
+
+HTML_CLAUDE = """<div id="claude-view" style="display:none">
+  <div class="claude-layout">
+    <div class="claude-auth" id="claude-auth" style="display:none">
+      <div class="claude-auth-box">
+        <div class="claude-auth-title">Claude Chat</div>
+        <div class="claude-auth-desc">Checking authorization...</div>
+        <button class="claude-auth-btn" id="claude-login-btn" style="display:none">Login</button>
+        <div id="claude-auth-url" style="display:none"></div>
+      </div>
+    </div>
+    <div class="claude-chat" id="claude-chat" style="display:none">
+      <div class="claude-header">
+        <span class="claude-title">Claude</span>
+        <span class="claude-model-label" id="claude-model-label"></span>
+        <button class="claude-new-btn" id="claude-new-btn" title="New conversation">&#x21bb;</button>
+      </div>
+      <div class="claude-messages" id="claude-messages"></div>
+      <div class="claude-compose">
+        <textarea id="claude-input" placeholder="Type your message..." rows="2"></textarea>
+        <div class="claude-compose-row">
+          <select id="claude-model">
+            <option value="sonnet" selected>Sonnet</option>
+            <option value="opus">Opus</option>
+            <option value="haiku">Haiku</option>
+          </select>
+          <button id="claude-send-btn">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 """

@@ -11,7 +11,8 @@ from css import CSS
 from js_vendor import MARKED_JS
 from js_browser import JS_BROWSER
 from js_telegram import JS_TELEGRAM
-from html_templates import HTML_TAB_BAR, HTML_BROWSER, HTML_TELEGRAM
+from js_claude import JS_CLAUDE
+from html_templates import HTML_TAB_BAR, HTML_BROWSER, HTML_TELEGRAM, HTML_CLAUDE
 from handler import Handler
 
 log = logging.getLogger("ioe-web")
@@ -101,11 +102,13 @@ HTML_PAGE = (
     + HTML_TAB_BAR
     + HTML_BROWSER
     + HTML_TELEGRAM
+    + HTML_CLAUDE
     + """
 <script>
 """
     + JS_BROWSER
     + JS_TELEGRAM
+    + JS_CLAUDE
     + """
 </script>
 </body>
