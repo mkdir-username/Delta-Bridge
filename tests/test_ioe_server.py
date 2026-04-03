@@ -51,6 +51,18 @@ os.environ.setdefault("IOE_SECRET", "secret123")
 import server as _server_mod
 sys.modules["ioe_server"] = _server_mod
 
+from unittest.mock import patch
+
+_dns_patcher = patch("socket.getaddrinfo", return_value=[
+    (2, 1, 6, "", ("93.184.216.34", 0))
+])
+
+def setup_module(module):
+    _dns_patcher.start()
+
+def teardown_module(module):
+    _dns_patcher.stop()
+
 
 def test_do_search_returns_list_of_dicts():
     """do_search must return structured results, not plain text."""
