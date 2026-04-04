@@ -1,4 +1,5 @@
 """IoE Server v2: folder-based, steganographic, AES-256-GCM."""
+from __future__ import annotations
 import os
 import sys
 import time
@@ -17,6 +18,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
 import truststore
@@ -35,7 +37,7 @@ try:
     BROWSER_AVAILABLE = True
 except ImportError:
     BROWSER_AVAILABLE = False
-    def handle_browser_request(request):
+    def handle_browser_request(request: dict[str, Any]) -> dict[str, Any]:
         return {"status": 503, "error": "browser handler not available"}
 
 try:
@@ -65,10 +67,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("ioe")
 
-_tg_listeners_started = set()
+_tg_listeners_started: set[str] = set()
 
 
-def _send_tg_notification(notification):
+def _send_tg_notification(notification: dict[str, Any]) -> None:
     try:
         client = IMAPClient(IMAP_HOST, ssl=True)
         client.login(EMAIL, PASSWORD)
@@ -78,7 +80,7 @@ def _send_tg_notification(notification):
         log.error("Failed to send TG notification: %s", e)
 
 
-def _start_telegram_listener(adapter, user_id):
+def _start_telegram_listener(adapter: Any, user_id: str) -> None:
     if user_id in _tg_listeners_started:
         return
     _tg_listeners_started.add(user_id)
@@ -137,15 +139,15 @@ BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254", "metada
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 RATE_LIMIT = 10
 RATE_WINDOW = 60
-_rate_timestamps = {}
-_processed_uids = set()
+_rate_timestamps: dict[str, list[float]] = {}
+_processed_uids: set[int] = set()
 _MAX_PROCESSED = 1000
 
-_sessions = {}
+_sessions: dict[str, dict[str, Any]] = {}
 SESSION_TTL = 3600
 
 
-def validate_url(url):
+def validate_url(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError("Only http/https")
@@ -170,7 +172,7 @@ def validate_url(url):
                 pass
 
 
-def check_rate_limit(user_id="default"):
+def check_rate_limit(user_id: str = "default") -> None:
     now = time.time()
     if user_id not in _rate_timestamps:
         _rate_timestamps[user_id] = []
@@ -181,7 +183,7 @@ def check_rate_limit(user_id="default"):
     ts.append(now)
 
 
-def make_envelope(encrypted_bytes):
+def make_envelope(encrypted_bytes: bytes) -> MIMEMultipart:
     msg = MIMEMultipart()
     msg["Subject"] = f"{random.choice(SUBJECTS)} {uuid.uuid4().hex[:8]}"
     msg["From"] = EMAIL
@@ -197,14 +199,14 @@ def make_envelope(encrypted_bytes):
     return msg
 
 
-def append_response(client, response_dict):
+def append_response(client: Any, response_dict: dict[str, Any]) -> None:
     payload = json.dumps(response_dict, ensure_ascii=False)
     encrypted = encrypt(IOE_KEY, payload).encode("ascii")
     msg = make_envelope(encrypted)
     client.append("INBOX", msg.as_bytes())
 
 
-def fetch_text(url):
+def fetch_text(url: str) -> str:
     validate_url(url)
     resp = requests.get(url, timeout=FETCH_TIMEOUT, headers={"User-Agent": UA})
     resp.raise_for_status()
@@ -220,7 +222,7 @@ import re as _re
 MIN_EXTRACT_LEN = 200
 
 
-def detect_type(url, html):
+def detect_type(url: str, html: str) -> str:
     if _re.search(r'/article|/post|/blog|/news/\d', url):
         return 'article'
     if _re.search(r'/feed|/hub|/flows|/all$|/top$', url):
@@ -236,11 +238,11 @@ def detect_type(url, html):
     return 'page'
 
 
-_page_cache = {}
+_page_cache: dict[str, dict[str, Any]] = {}
 PAGE_CACHE_MAX = 100
 
 
-def smart_extract(url):
+def smart_extract(url: str) -> dict[str, Any]:
     cache_key = url.split('?')[0]
     if cache_key in _page_cache:
         log.info("cache HIT: %s", url)
@@ -253,7 +255,7 @@ def smart_extract(url):
     return result
 
 
-def _smart_extract_impl(url):
+def _smart_extract_impl(url: str) -> dict[str, Any]:
     validate_url(url)
     resp = requests.get(url, timeout=FETCH_TIMEOUT, headers={"User-Agent": UA})
     resp.raise_for_status()
@@ -331,7 +333,7 @@ def _smart_extract_impl(url):
     }
 
 
-def fetch_readable(url):
+def fetch_readable(url: str) -> tuple[str, str]:
     validate_url(url)
     resp = requests.get(url, timeout=FETCH_TIMEOUT, headers={"User-Agent": UA})
     resp.raise_for_status()
@@ -342,7 +344,7 @@ def fetch_readable(url):
     return title, content
 
 
-def inline_images(html, base_url, max_images=10, max_kb=80):
+def inline_images(html: str, base_url: str, max_images: int = 10, max_kb: int = 80) -> str:
     soup = BeautifulSoup(html, "html.parser")
     count = 0
     for img in soup.find_all("img", src=True):
@@ -382,7 +384,7 @@ def inline_images(html, base_url, max_images=10, max_kb=80):
     return str(soup)
 
 
-def do_search(query):
+def do_search(query: str) -> list[dict[str, str]]:
     try:
         try:
             from ddgs import DDGS
@@ -397,7 +399,7 @@ def do_search(query):
         return [{"title": "Search error", "href": "", "snippet": str(e)}]
 
 
-def extract_attachment(raw):
+def extract_attachment(raw: bytes) -> Optional[bytes]:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
@@ -405,7 +407,7 @@ def extract_attachment(raw):
     return None
 
 
-def _cleanup_sessions():
+def _cleanup_sessions() -> None:
     now = time.time()
     expired = [k for k, v in _sessions.items() if now - v["created"] > SESSION_TTL]
     for k in expired:
@@ -413,7 +415,7 @@ def _cleanup_sessions():
         del _sessions[k]
 
 
-def handle_http_proxy(request):
+def handle_http_proxy(request: dict[str, Any]) -> dict[str, Any]:
     method = request.get("method", "GET").upper()
     url = request.get("url", "")
     headers = request.get("headers", {})
@@ -486,16 +488,16 @@ def handle_http_proxy(request):
 CLAUDE_PROXY_TIMEOUT = 300
 CLAUDE_DEFAULT_HOST = "api.anthropic.com"
 
-_claude_session = None
+_claude_session: Optional[requests.Session] = None
 
-def _get_claude_session():
+def _get_claude_session() -> requests.Session:
     global _claude_session
     if _claude_session is None:
         _claude_session = requests.Session()
     return _claude_session
 
 
-def handle_claude_proxy(request):
+def handle_claude_proxy(request: dict[str, Any]) -> dict[str, Any]:
     http_req = request.get("http_request", {})
     method = http_req.get("method", "GET").upper()
     path = http_req.get("path", "/")
@@ -528,7 +530,7 @@ def handle_claude_proxy(request):
         return {"type": "claude_proxy_response", "http_response": {"status_code": 502, "headers": {}, "body": str(e)}}
 
 
-def handle_claude_chat(request):
+def handle_claude_chat(request: dict[str, Any]) -> dict[str, Any]:
     if _claude_chat is None:
         return {"status": 503, "error": "claude CLI not available"}
     action = request.get("action", "")
@@ -542,7 +544,7 @@ def handle_claude_chat(request):
     return {"status": 400, "error": "unknown action: {}".format(action)}
 
 
-def dispatch_request(request):
+def dispatch_request(request: dict[str, Any]) -> Optional[dict[str, Any]]:
     req_type = request.get("type")
     if req_type is None:
         return None
@@ -588,7 +590,7 @@ def dispatch_request(request):
     return {"status": 400, "error": f"unknown type: {req_type}", "user_id": user_id}
 
 
-def process_message(client, uid, raw):
+def process_message(client: Any, uid: int, raw: bytes) -> bool:
     if uid in _processed_uids:
         log.info("uid=%s already processed, skipping", uid)
         return True
@@ -683,7 +685,7 @@ def process_message(client, uid, raw):
 LOCK_FILE = "/tmp/ioe-server.lock"
 
 
-def _acquire_lock():
+def _acquire_lock() -> Any:
     fd = open(LOCK_FILE, "w")
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -695,7 +697,7 @@ def _acquire_lock():
     return fd
 
 
-def main():
+def main() -> None:
     _lock_fd = _acquire_lock()  # noqa: F841 — prevent GC releasing the lock
     log.info("IoE server v2 starting")
     while True:
