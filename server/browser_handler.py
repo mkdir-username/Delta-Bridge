@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import time
 import base64
 import logging
 import threading
+from typing import Any
 
 log = logging.getLogger("ioe.browser")
 
@@ -13,21 +16,21 @@ except ImportError:
 
 
 class BrowserPool:
-    def __init__(self, max_browsers=2, page_ttl=300):
+    def __init__(self, max_browsers: int = 2, page_ttl: int = 300) -> None:
         self.max_browsers = max_browsers
         self.page_ttl = page_ttl
-        self.pages = {}
-        self.lock = threading.Lock()
-        self._pw = None
-        self._browser = None
+        self.pages: dict[str, dict[str, Any]] = {}
+        self.lock: threading.Lock = threading.Lock()
+        self._pw: Any | None = None
+        self._browser: Any | None = None
 
-    def _ensure_browser(self):
+    def _ensure_browser(self) -> Any:
         if self._pw is None:
             self._pw = sync_playwright().start()
             self._browser = self._pw.chromium.launch(headless=True)
         return self._browser
 
-    def get_page(self, session_id=None):
+    def get_page(self, session_id: str | None = None) -> Any | None:
         with self.lock:
             self._cleanup_expired()
             if session_id and session_id in self.pages:
@@ -42,7 +45,7 @@ class BrowserPool:
             self.pages[sid] = {"page": page, "last_used": time.time()}
             return page
 
-    def release(self, session_id):
+    def release(self, session_id: str) -> None:
         with self.lock:
             if session_id in self.pages:
                 try:
@@ -51,7 +54,7 @@ class BrowserPool:
                     pass
                 del self.pages[session_id]
 
-    def _cleanup_expired(self):
+    def _cleanup_expired(self) -> None:
         now = time.time()
         expired = [k for k, v in self.pages.items() if now - v["last_used"] > self.page_ttl]
         for k in expired:
@@ -61,7 +64,7 @@ class BrowserPool:
                 pass
             del self.pages[k]
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         with self.lock:
             for entry in self.pages.values():
                 try:
@@ -81,16 +84,16 @@ class BrowserPool:
                     pass
 
 
-_pool = None
+_pool: BrowserPool | None = None
 
-def get_pool():
+def get_pool() -> BrowserPool:
     global _pool
     if _pool is None:
         _pool = BrowserPool()
     return _pool
 
 
-def handle_browser_request(request):
+def handle_browser_request(request: dict[str, Any]) -> dict[str, Any]:
     if not PLAYWRIGHT_AVAILABLE:
         return {"status": 503, "error": "playwright not installed"}
 
@@ -168,14 +171,14 @@ def handle_browser_request(request):
             pool.release(session_id or "page_0")
 
 
-def _take_screenshot(page):
+def _take_screenshot(page: Any) -> str:
     png_bytes = page.screenshot(type="jpeg", quality=50, full_page=False)
     return base64.b64encode(png_bytes).decode("ascii")
 
 
-def _get_clickable_elements(page, max_elements=50):
+def _get_clickable_elements(page: Any, max_elements: int = 50) -> list[dict[str, Any]]:
     elements = page.query_selector_all("a, button, input, textarea, select")
-    result = []
+    result: list[dict[str, Any]] = []
     for el in elements[:max_elements]:
         try:
             bbox = el.bounding_box()
