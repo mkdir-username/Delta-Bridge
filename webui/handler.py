@@ -1,6 +1,9 @@
 """IoE HTTP request handler."""
-import json
+from __future__ import annotations
+import sys
 import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import json
 import re as _re
 import uuid
 import secrets
@@ -9,13 +12,14 @@ import threading
 import logging
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+from typing import Any
 
 import auth
 from transport import imap_conn, send_request, poll_response
 
 log = logging.getLogger("ioe-web")
 
-_ERROR_MAP = [
+_ERROR_MAP: list[tuple[_re.Pattern[str], str | None]] = [
     (_re.compile(r"UNAVAILABLE", _re.I), "Сервер почты недоступен, попробуйте позже"),
     (_re.compile(r"all available options.*already used", _re.I), "Слишком много попыток. Подождите 10 минут"),
     (_re.compile(r"phone number is invalid", _re.I), "Неверный номер телефона"),
@@ -24,7 +28,7 @@ _ERROR_MAP = [
 ]
 
 
-def _humanize_error(raw):
+def _humanize_error(raw: object) -> str:
     s = str(raw)
     for pattern, msg in _ERROR_MAP:
         m = pattern.search(s)
@@ -36,28 +40,28 @@ def _humanize_error(raw):
             return msg
     return "Ошибка сервера: {}".format(s)
 
-_TG_ALLOWED_KEYS = {"phone", "code", "password", "chat_id", "text", "limit",
-                     "offset_id", "reply_to_id", "message_id", "folder", "query"}
+_TG_ALLOWED_KEYS: set[str] = {"phone", "code", "password", "chat_id", "text", "limit",
+                              "offset_id", "reply_to_id", "message_id", "folder", "query"}
 
-_auth_attempts = {}
-_login_request_owners = {}
-_code_attempts = {}
-_CODE_LIMIT = 5
-_CODE_WINDOW = 300
-_AUTH_LIMIT = 3
-_AUTH_WINDOW = 300
+_auth_attempts: dict[str, list[float]] = {}
+_login_request_owners: dict[str, str] = {}
+_code_attempts: dict[str, list[float]] = {}
+_CODE_LIMIT: int = 5
+_CODE_WINDOW: int = 300
+_AUTH_LIMIT: int = 3
+_AUTH_WINDOW: int = 300
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
+    def log_message(self, fmt: str, *args: Any) -> None:
         pass
 
-    def _add_security_headers(self):
+    def _add_security_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
 
-    def respond_json(self, data, code=200):
+    def respond_json(self, data: Any, code: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -66,7 +70,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _handle_demo(self, cmd, qs, req_id):
+    def _handle_demo(self, cmd: str, qs: dict[str, list[str]], req_id: str) -> None:
         if cmd == "SEARCH":
             q = qs.get("q", [""])[0]
             results = [
@@ -87,7 +91,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.respond_json({"status": "error", "error": "unknown cmd"})
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         import ioe_web
 
         parsed = urlparse(self.path)
@@ -108,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
             with ioe_web.lock:
                 if (login_user_id, req_id) in ioe_web.pending:
                     resp = ioe_web.pending.pop((login_user_id, req_id))
-                    result = {"status": "ready"}
+                    result: dict[str, Any] = {"status": "ready"}
                     for key in resp:
                         if key in ("id", "status"):
                             continue
@@ -395,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
 
         self.send_error(404)
 
-    def _serve_login(self, error="", status=200):
+    def _serve_login(self, error: str = "", status: int = 200) -> None:
         from html_templates import login_page
         body = login_page(error).encode()
         self.send_response(status)
@@ -404,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _handle_login_tg_post(self):
+    def _handle_login_tg_post(self) -> None:
         import ioe_web
         import secrets
 
@@ -480,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
         t.start()
         self.respond_json({"id": req_id, "status": "pending"})
 
-    def _handle_login_email_post(self):
+    def _handle_login_email_post(self) -> None:
         import ioe_web
 
         content_length = int(self.headers.get("Content-Length", 0))
@@ -544,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json({"status": "error", "error": "unknown action"})
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         import ioe_web
         from transport import imap_conn, send_request, poll_response
 
