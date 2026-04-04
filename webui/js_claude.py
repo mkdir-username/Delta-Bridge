@@ -158,8 +158,16 @@ function renderClaudeMessage(role, text) {
   if (role === 'assistant') {
     try {
       var container = document.createElement('div');
-      container.innerHTML = marked.parse(text);
-      while (container.firstChild) div.appendChild(container.firstChild);
+      var parsed = marked.parse(text);
+      var _sanitize = document.createElement('div');
+      _sanitize.innerHTML = parsed;
+      _sanitize.querySelectorAll('script,iframe,object,embed,form').forEach(function(el) { el.remove(); });
+      _sanitize.querySelectorAll('*').forEach(function(el) {
+        Array.from(el.attributes).forEach(function(a) {
+          if (a.name.indexOf('on') === 0) el.removeAttribute(a.name);
+        });
+      });
+      while (_sanitize.firstChild) div.appendChild(_sanitize.firstChild);
     } catch(e) { div.textContent = text; }
   } else {
     div.textContent = text;
