@@ -223,7 +223,8 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("[%s] send: done (%.1fs)", req_id, time.time() - t0)
             except Exception as e:
                 log.error("[%s] send: FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
             t.start()
@@ -266,7 +267,8 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] proxy send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -311,7 +313,8 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] tg send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -343,7 +346,8 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] claude send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -401,7 +405,8 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] browser send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -433,7 +438,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         action = body.get("action", "")
-        if action not in ("auth_start", "auth_code", "check_auth"):
+        if action not in ("auth_start", "auth_code", "check_auth", "auth_logout"):
             self.respond_json({"status": "error", "error": "forbidden action"})
             return
 
@@ -488,7 +493,8 @@ class Handler(BaseHTTPRequestHandler):
             m.logout()
         except Exception as e:
             log.error("[%s] login/tg send FAILED: %s", req_id, e)
-            self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+            err_type, err_msg = _classify_error(str(e))
+            self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
             return
 
         _login_request_owners[req_id] = login_user_id
@@ -643,7 +649,8 @@ class Handler(BaseHTTPRequestHandler):
             m.logout()
         except Exception as e:
             log.error("[%s] tg POST send FAILED: %s", req_id, e)
-            self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+            err_type, err_msg = _classify_error(str(e))
+            self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
             return
 
         t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
