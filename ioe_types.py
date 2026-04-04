@@ -1,6 +1,6 @@
 """Shared type definitions for Delta-Bridge IoE protocol."""
 from __future__ import annotations
-from typing import TypedDict, NotRequired
+from typing import Any, TypedDict, NotRequired
 
 
 class BaseRequest(TypedDict):
@@ -19,7 +19,7 @@ class HttpProxyRequest(BaseRequest):
     method: str
     url: str
     extract: NotRequired[bool]
-    body: NotRequired[str | dict]
+    body: NotRequired[str | dict[str, Any]]
     session_id: NotRequired[str]
 
 
