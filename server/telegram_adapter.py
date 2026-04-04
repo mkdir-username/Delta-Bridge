@@ -43,10 +43,10 @@ class TelegramAdapter:
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()  # type: ignore[union-attr]
+        self.loop.run_forever()  # type: ignore[union-attr]  # loop set in start() before thread
 
     def _run_sync(self, coro: Any) -> Any:
-        future = asyncio.run_coroutine_threadsafe(coro, self.loop)  # type: ignore[arg-type]
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)  # type: ignore[arg-type]  # loop set in start()
         return future.result(timeout=30)
 
     def _get_client(self, user_id: str) -> Any:

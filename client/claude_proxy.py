@@ -92,7 +92,7 @@ def _send_via_imap(payload_b64: bytes) -> None:
     msg.attach(part)
     with _send_lock:
         conn = _get_send_conn()
-        conn.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]
+        conn.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
 
 
 def _extract_attachment(raw: bytes) -> bytes | None:
@@ -301,7 +301,7 @@ if __name__ == "__main__":
     try:
         from dotenv import load_dotenv
     except ImportError:
-        def load_dotenv(path: Any) -> None:  # type: ignore[misc]
+        def load_dotenv(path: Any) -> None:  # type: ignore[misc]  # fallback redefines import
             with open(path) as f:
                 for line in f:
                     line = line.strip()
