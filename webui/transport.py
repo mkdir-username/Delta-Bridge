@@ -23,17 +23,19 @@ log = logging.getLogger("ioe-web")
 def imap_conn() -> imaplib.IMAP4_SSL:
     import ioe_web
     last_err = None
-    for attempt in range(3):
+    delays = [2, 5, 10, 20, 30]
+    for attempt in range(len(delays) + 1):
         try:
             m = imaplib.IMAP4_SSL(ioe_web.IMAP_HOST, 993)
             m.login(ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
             return m
         except Exception as e:
             last_err = e
-            if attempt < 2:
-                log.warning("IMAP login attempt %d failed: %s", attempt + 1, e)
-                time.sleep(2)
-    raise last_err  # type: ignore[misc]  # always set after 3 attempts
+            if attempt < len(delays):
+                delay = delays[attempt] + random.random() * delays[attempt] * 0.3
+                log.warning("IMAP login attempt %d failed: %s (retry in %.0fs)", attempt + 1, e, delay)
+                time.sleep(delay)
+    raise last_err  # type: ignore[misc]  # always set after len(delays)+1 attempts
 
 
 def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
@@ -74,7 +76,7 @@ def poll_response(user_id: str, req_id: str) -> None:
         seen_uids = set()
         for cycle in range(60):
             if cycle > 0:
-                time.sleep(1)
+                time.sleep(1 + random.random() * 0.6)
             m.noop()
             _, msgs = m.search(None, "ALL")
             if not msgs[0]:
@@ -112,11 +114,14 @@ def poll_response(user_id: str, req_id: str) -> None:
                         try:
                             m.store(uid, "+FLAGS", "\\Deleted")
                             m.expunge()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.debug("[%s] poll: cleanup failed: %s", req_id, e)
                         if "error" in response:
-                            from handler import _humanize_error
-                            response["error"] = _humanize_error(response["error"])
+                            from handler import _classify_error
+                            err_type, err_msg = _classify_error(response["error"])
+                            response["error"] = err_msg
+                            if "error_type" not in response:
+                                response["error_type"] = err_type
                         with ioe_web.lock:
                             ioe_web.pending[(user_id, req_id)] = response
                         m.logout()
@@ -135,18 +140,20 @@ def poll_response(user_id: str, req_id: str) -> None:
                         for old_uid in old[0].split():
                             m.store(old_uid, "+FLAGS", "\\Deleted")
                         m.expunge()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("[%s] poll: old mail cleanup: %s", req_id, e)
         elapsed = time.time() - t0
         log.warning("[%s] poll: TIMEOUT after %.0fs", req_id, elapsed)
         with ioe_web.lock:
-            ioe_web.pending[(user_id, req_id)] = {"id": req_id, "status": 504, "error": "timeout ({}s)".format(int(elapsed))}
+            ioe_web.pending[(user_id, req_id)] = {"id": req_id, "status": 504, "error": "timeout ({}s)".format(int(elapsed)), "error_type": "transport"}
         m.logout()
     except Exception as e:
         elapsed = time.time() - t0
         log.error("[%s] poll: ERROR after %.0fs: %s", req_id, elapsed, e)
+        from handler import _classify_error
+        err_type, err_msg = _classify_error(str(e))
         with ioe_web.lock:
-            ioe_web.pending[(user_id, req_id)] = {"id": req_id, "status": 500, "error": str(e)}
+            ioe_web.pending[(user_id, req_id)] = {"id": req_id, "status": 500, "error": err_msg, "error_type": err_type}
 
 
 def rewrite_links(html: str) -> str:
