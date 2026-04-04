@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import subprocess
 import json
 import logging
 import threading
+from typing import Any
 
 log = logging.getLogger("claude-chat")
 
@@ -12,11 +15,11 @@ MAX_BUDGET_USD = 1.0
 
 
 class ClaudeChat:
-    def __init__(self):
-        self._sessions = {}
-        self._lock = threading.Lock()
+    def __init__(self) -> None:
+        self._sessions: dict[str, str] = {}
+        self._lock: threading.Lock = threading.Lock()
 
-    def send_message(self, user_id, text, model=None):
+    def send_message(self, user_id: str, text: str, model: str | None = None) -> dict[str, Any]:
         cmd = [
             CLAUDE_BIN, "-p", text,
             "--output-format", "json",
@@ -60,7 +63,7 @@ class ClaudeChat:
         except FileNotFoundError:
             return {"error": "claude CLI not found on VPS"}
 
-    def check_auth(self):
+    def check_auth(self) -> dict[str, Any]:
         try:
             proc = subprocess.run(
                 [CLAUDE_BIN, "auth", "status"],
@@ -77,7 +80,7 @@ class ClaudeChat:
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def new_conversation(self, user_id):
+    def new_conversation(self, user_id: str) -> dict[str, str]:
         with self._lock:
             self._sessions.pop(user_id, None)
         return {"status": "ok"}
