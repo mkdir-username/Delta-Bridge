@@ -1,4 +1,6 @@
 """IoE WebUI: local web-based browser over IoE transport."""
+from __future__ import annotations
+from typing import Any
 import os
 import sys
 import json
@@ -27,39 +29,39 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
-EMAIL = os.environ["EMAIL"]
-IMAP_PASSWORD = os.environ["IMAP_PASSWORD"]
-IOE_KEY = derive_key(os.environ["IOE_SECRET"])
-IMAP_HOST = "imap.yandex.ru"
-QUEUE_FOLDER = "IoE"
+EMAIL: str = os.environ["EMAIL"]
+IMAP_PASSWORD: str = os.environ["IMAP_PASSWORD"]
+IOE_KEY: bytes = derive_key(os.environ["IOE_SECRET"])
+IMAP_HOST: str = "imap.yandex.ru"
+QUEUE_FOLDER: str = "IoE"
 
-SUBJECTS = [
+SUBJECTS: list[str] = [
     "Re: Встреча", "Fw: Документы", "Отчёт", "Заказ",
     "Фото", "Бронирование", "Напоминание", "Чек",
 ]
-FILENAMES = ["report.pdf", "scan.pdf", "doc.pdf", "invoice.pdf"]
-BODIES = ["", "см. вложение", "Документ"]
+FILENAMES: list[str] = ["report.pdf", "scan.pdf", "doc.pdf", "invoice.pdf"]
+BODIES: list[str] = ["", "см. вложение", "Документ"]
 
-DEMO_MODE = "--demo" in sys.argv
+DEMO_MODE: bool = "--demo" in sys.argv
 
 import hashlib as _hashlib
-_device_seed = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
+_device_seed: str = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
     os.environ.get("USER", "cli"), os.uname().nodename)
-DEVICE_ID = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
+DEVICE_ID: str = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
 
-pending = {}
-lock = threading.Lock()
-notification_queues = {}
-seen_notification_uids = set()
+pending: dict[str, dict[str, Any]] = {}
+lock: threading.Lock = threading.Lock()
+notification_queues: dict[str, list[dict[str, Any]]] = {}
+seen_notification_uids: set[str] = set()
 
 
-def imap_conn():
+def imap_conn() -> imaplib.IMAP4_SSL:
     m = imaplib.IMAP4_SSL(IMAP_HOST, 993)
     m.login(EMAIL, IMAP_PASSWORD)
     return m
 
 
-def send_request(m, request_dict):
+def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
     payload = json.dumps(request_dict)
     encrypted = encrypt(IOE_KEY, payload).encode("ascii")
     msg = MIMEMultipart()
@@ -73,18 +75,18 @@ def send_request(m, request_dict):
     part.add_header("Content-Disposition", "attachment",
                     filename=random.choice(FILENAMES))
     msg.attach(part)
-    m.append(QUEUE_FOLDER, None, None, msg.as_bytes())
+    m.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]
 
 
-def extract_attachment(raw):
+def extract_attachment(raw: bytes) -> bytes | None:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
-            return part.get_payload(decode=True)
+            return part.get_payload(decode=True)  # type: ignore[return-value]
     return None
 
 
-def poll_response(req_id):
+def poll_response(req_id: str) -> None:
     t0 = time.time()
     try:
         log.info("[%s] poll: connecting IMAP...", req_id)
@@ -106,7 +108,7 @@ def poll_response(req_id):
             for uid in reversed(new_uids):
                 seen_uids.add(uid)
                 _, data = m.fetch(uid, "(RFC822)")
-                raw = data[0][1]
+                raw = data[0][1]  # type: ignore[index]
                 if not isinstance(raw, bytes):
                     continue
                 att = extract_attachment(raw)
@@ -164,7 +166,7 @@ def poll_response(req_id):
             pending[req_id] = {"id": req_id, "status": 500, "error": str(e)}
 
 
-def rewrite_links(html):
+def rewrite_links(html: str) -> str:
     html = re.sub(
         r'href="(https?://[^"]+)"',
         lambda m: 'href="/get?url={}"'.format(m.group(1)),
@@ -1018,10 +1020,10 @@ urlInput.focus();
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
+    def log_message(self, fmt: str, *args: Any) -> None:
         pass
 
-    def respond_json(self, data, code=200):
+    def respond_json(self, data: dict[str, Any], code: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1029,7 +1031,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _handle_demo(self, cmd, qs, req_id):
+    def _handle_demo(self, cmd: str, qs: dict[str, list[str]], req_id: str) -> None:
         if cmd == "SEARCH":
             q = qs.get("q", [""])[0]
             results = [
@@ -1050,7 +1052,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.respond_json({"status": "error", "error": "unknown cmd"})
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
 
@@ -1119,7 +1121,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
 
-def main():
+def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8080
     server = HTTPServer(("0.0.0.0", port), Handler)
     mode = " (demo)" if DEMO_MODE else ""
