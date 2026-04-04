@@ -1,4 +1,5 @@
 """Local HTTP proxy that tunnels Claude Code CLI traffic through IoE IMAP transport."""
+from __future__ import annotations
 import json
 import os
 import sys
@@ -13,6 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+from typing import Any
 import email as email_mod
 
 from crypto import derive_key, compress_encrypt, decrypt_decompress
@@ -24,44 +26,44 @@ logging.basicConfig(
 )
 log = logging.getLogger("claude-proxy")
 
-EMAIL = os.environ.get("EMAIL", "")
-IMAP_PASSWORD = os.environ.get("IMAP_PASSWORD", "")
-IOE_SECRET = os.environ.get("IOE_SECRET", "")
-IOE_KEY = derive_key(IOE_SECRET) if IOE_SECRET else b""
+EMAIL: str = os.environ.get("EMAIL", "")
+IMAP_PASSWORD: str = os.environ.get("IMAP_PASSWORD", "")
+IOE_SECRET: str = os.environ.get("IOE_SECRET", "")
+IOE_KEY: bytes = derive_key(IOE_SECRET) if IOE_SECRET else b""
 
-IMAP_HOST = "imap.yandex.ru"
-QUEUE_FOLDER = "IoE"
-PROXY_PORT = int(os.environ.get("IOE_CLAUDE_PORT", "8090"))
-POLL_CYCLES = 300
+IMAP_HOST: str = "imap.yandex.ru"
+QUEUE_FOLDER: str = "IoE"
+PROXY_PORT: int = int(os.environ.get("IOE_CLAUDE_PORT", "8090"))
+POLL_CYCLES: int = 300
 
-SUBJECTS = [
+SUBJECTS: list[str] = [
     "Re: Протокол совещания", "Отчёт за неделю", "ТЗ на доработку",
     "Коммерческое предложение", "Fw: Акт выполненных работ",
     "Re: Согласование бюджета", "Счёт на оплату", "Fw: Заявка на отпуск",
     "Фото с дня рождения", "Re: Рецепт шарлотки", "Билеты на поезд",
     "Заказ подтверждён", "Fw: Чек об оплате", "Статус доставки",
 ]
-FILENAMES = [
+FILENAMES: list[str] = [
     "scan_001.pdf", "receipt.pdf", "document.pdf", "invoice.pdf",
     "report.pdf", "contract.pdf", "act.pdf", "statement.pdf",
 ]
-BODIES = [
+BODIES: list[str] = [
     "см. вложение", "Документ во вложении", "Пересылаю",
     "Как договаривались", "Подтверждение", "Во вложении",
 ]
 
 
-_send_lock = threading.Lock()
-_send_conn = None
+_send_lock: threading.Lock = threading.Lock()
+_send_conn: imaplib.IMAP4_SSL | None = None
 
 
-def _imap_connect():
+def _imap_connect() -> imaplib.IMAP4_SSL:
     m = imaplib.IMAP4_SSL(IMAP_HOST, 993)
     m.login(EMAIL, IMAP_PASSWORD)
     return m
 
 
-def _get_send_conn():
+def _get_send_conn() -> imaplib.IMAP4_SSL:
     global _send_conn
     if _send_conn is not None:
         try:
@@ -77,7 +79,7 @@ def _get_send_conn():
     return _send_conn
 
 
-def _send_via_imap(payload_b64):
+def _send_via_imap(payload_b64: bytes) -> None:
     msg = MIMEMultipart()
     msg["Subject"] = "{} {}".format(random.choice(SUBJECTS), uuid.uuid4().hex[:8])
     msg["From"] = EMAIL
@@ -90,18 +92,19 @@ def _send_via_imap(payload_b64):
     msg.attach(part)
     with _send_lock:
         conn = _get_send_conn()
-        conn.append(QUEUE_FOLDER, None, None, msg.as_bytes())
+        conn.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]
 
 
-def _extract_attachment(raw):
+def _extract_attachment(raw: bytes) -> bytes | None:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
-            return part.get_payload(decode=True)
+            payload = part.get_payload(decode=True)
+            return payload if isinstance(payload, bytes) else None
     return None
 
 
-def _poll_response(req_id):
+def _poll_response(req_id: str) -> dict[str, Any] | None:
     t0 = time.time()
     m = None
     try:
@@ -169,7 +172,7 @@ def _poll_response(req_id):
 
 
 class ClaudeProxyHandler(BaseHTTPRequestHandler):
-    def _handle_request(self, method):
+    def _handle_request(self, method: str) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else None
 
@@ -233,28 +236,28 @@ class ClaudeProxyHandler(BaseHTTPRequestHandler):
             _f.write(f"{time.strftime('%H:%M:%S')} RSP {status_code} {len(body_bytes)}b {elapsed:.1f}s {self.path}\n")
         log.info("[%s] ← %d (%d bytes, %.1fs)", req_id, status_code, len(body_bytes), elapsed)
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         self._handle_request("GET")
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         self._handle_request("POST")
 
-    def do_PUT(self):
+    def do_PUT(self) -> None:
         self._handle_request("PUT")
 
-    def do_PATCH(self):
+    def do_PATCH(self) -> None:
         self._handle_request("PATCH")
 
-    def do_DELETE(self):
+    def do_DELETE(self) -> None:
         self._handle_request("DELETE")
 
-    def do_OPTIONS(self):
+    def do_OPTIONS(self) -> None:
         self._handle_request("OPTIONS")
 
-    def do_HEAD(self):
+    def do_HEAD(self) -> None:
         self._handle_request("HEAD")
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
@@ -262,12 +265,12 @@ class ThreadedHTTPServer(HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-    def process_request(self, request, client_address):
+    def process_request(self, request: Any, client_address: Any) -> None:
         t = threading.Thread(target=self.process_request_thread, args=(request, client_address))
         t.daemon = True
         t.start()
 
-    def process_request_thread(self, request, client_address):
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
         try:
             self.finish_request(request, client_address)
         except Exception:
@@ -276,7 +279,7 @@ class ThreadedHTTPServer(HTTPServer):
             self.shutdown_request(request)
 
 
-def main():
+def main() -> None:
     if not all([EMAIL, IMAP_PASSWORD, IOE_SECRET]):
         print("Set EMAIL, IMAP_PASSWORD, IOE_SECRET in environment or .env")
         sys.exit(1)
@@ -298,7 +301,7 @@ if __name__ == "__main__":
     try:
         from dotenv import load_dotenv
     except ImportError:
-        def load_dotenv(path):
+        def load_dotenv(path: Any) -> None:  # type: ignore[misc]
             with open(path) as f:
                 for line in f:
                     line = line.strip()
