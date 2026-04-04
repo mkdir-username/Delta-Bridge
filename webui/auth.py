@@ -1,4 +1,5 @@
 """Authentication: phone whitelist, httponly sessions, rate limiting, email OTP."""
+from __future__ import annotations
 import os
 import json
 import re
@@ -6,8 +7,13 @@ import time
 import secrets
 import hmac
 import smtplib
+import threading
 import logging
+import sys
 from email.mime.text import MIMEText as _MIMEText
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from ioe_types import SessionData, OTPEntry, WhitelistEntry, Whitelist, SessionStore, RateStore  # noqa: E402
 
 log = logging.getLogger("ioe.auth")
 
@@ -16,31 +22,52 @@ RATE_LIMIT = 5
 RATE_WINDOW = 60
 _CLEANUP_INTERVAL = 60
 
-_whitelist = {}
-_whitelist_path = ""
-_sessions = {}
-_sessions_path = ""
-_rate = {}
-_last_cleanup = 0
+_whitelist: Whitelist = {}
+_whitelist_path: str = ""
+_sessions: SessionStore = {}
+_sessions_path: str = ""
+_rate: RateStore = {}
+_last_cleanup: float = 0
 
 
-def load_whitelist(path=None):
+def sign_whitelist(path: str, secret: str) -> None:
+    with open(path, "rb") as f:
+        content = f.read()
+    sig = hmac.new(secret.encode(), content, "sha256").hexdigest()
+    with open(path + ".sig", "w") as f:
+        f.write(sig)
+
+
+def load_whitelist(path: str | None = None, secret: str | None = None) -> None:
     global _whitelist, _whitelist_path
     if path is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "users.json")
     _whitelist_path = os.path.abspath(path)
-    if os.path.exists(_whitelist_path):
-        with open(_whitelist_path) as f:
-            _whitelist = json.load(f)
-        log.info("Loaded %d phones from %s", len(_whitelist), _whitelist_path)
-        if not _whitelist:
-            log.error("WHITELIST EMPTY — no users can log in")
-    else:
+    if not os.path.exists(_whitelist_path):
         _whitelist = {}
         log.warning("No users.json at %s", _whitelist_path)
+        return
+
+    with open(_whitelist_path, "rb") as f:
+        raw = f.read()
+
+    if secret:
+        sig_path = _whitelist_path + ".sig"
+        if not os.path.exists(sig_path):
+            raise ValueError("users.json integrity: .sig file missing")
+        with open(sig_path) as f:
+            expected_sig = f.read().strip()
+        actual_sig = hmac.new(secret.encode(), raw, "sha256").hexdigest()
+        if not hmac.compare_digest(expected_sig, actual_sig):
+            raise ValueError("users.json integrity: signature mismatch — file tampered")
+
+    _whitelist = json.loads(raw)
+    log.info("Loaded %d phones from %s", len(_whitelist), _whitelist_path)
+    if not _whitelist:
+        log.error("WHITELIST EMPTY — no users can log in")
 
 
-def init_sessions(path=None):
+def init_sessions(path: str | None = None) -> None:
     global _sessions, _sessions_path
     if path is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sessions.json")
@@ -60,7 +87,7 @@ def init_sessions(path=None):
         _save_sessions()
 
 
-def _save_sessions():
+def _save_sessions() -> None:
     if not _sessions_path:
         return
     try:
@@ -72,18 +99,19 @@ def _save_sessions():
         log.warning("Failed to save sessions: %s", e)
 
 
-def _normalize_phone(phone):
+def _normalize_phone(phone: str) -> str:
     phone = re.sub(r"[\s\-()]", "", phone)
     if not phone.startswith("+"):
         phone = "+" + phone
     return phone
 
 
-def is_whitelisted(phone):
+def is_whitelisted(phone: str) -> bool:
     return _normalize_phone(phone) in _whitelist
 
 
-def verify_password(phone, password):
+def verify_password(phone: str, password: str) -> bool:
+    import bcrypt
     phone = _normalize_phone(phone)
     entry = _whitelist.get(phone)
     if not entry or not isinstance(entry, dict):
@@ -91,10 +119,15 @@ def verify_password(phone, password):
     stored = entry.get("password")
     if not stored:
         return False
-    return hmac.compare_digest(stored, password)
+    return bcrypt.checkpw(password.encode(), stored.encode())
 
 
-def create_session(user_id):
+def hash_password(password: str) -> str:
+    import bcrypt
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def create_session(user_id: str) -> str:
     sid = secrets.token_hex(32)
     _sessions[sid] = {"user_id": user_id, "created": time.time(), "last_seen": time.time()}
     _save_sessions()
@@ -102,7 +135,7 @@ def create_session(user_id):
     return sid
 
 
-def get_authenticated_user(cookie_header):
+def get_authenticated_user(cookie_header: str | None) -> str | None:
     _maybe_cleanup()
     if not cookie_header:
         return None
@@ -125,7 +158,7 @@ def get_authenticated_user(cookie_header):
     return None
 
 
-def delete_session(cookie_header):
+def delete_session(cookie_header: str | None) -> None:
     if not cookie_header:
         return
     for part in cookie_header.split(";"):
@@ -137,7 +170,7 @@ def delete_session(cookie_header):
             return
 
 
-def check_rate_limit(ip):
+def check_rate_limit(ip: str) -> bool:
     now = time.time()
     timestamps = _rate.get(ip, [])
     timestamps = [t for t in timestamps if now - t < RATE_WINDOW]
@@ -149,7 +182,7 @@ def check_rate_limit(ip):
     return True
 
 
-def _maybe_cleanup():
+def _maybe_cleanup() -> None:
     global _last_cleanup
     now = time.time()
     if now - _last_cleanup < _CLEANUP_INTERVAL:
@@ -166,12 +199,29 @@ def _maybe_cleanup():
 
 
 OTP_TTL = 300
+OTP_RATE_LIMIT = 3
+OTP_RATE_WINDOW = 300
 SMTP_HOST = "smtp.yandex.ru"
 SMTP_PORT = 465
-_otp_store = {}
+_otp_lock = threading.Lock()
+_otp_store: dict[str, OTPEntry] = {}
+_otp_phone_rate: RateStore = {}
 
 
-def get_user_email(phone):
+def check_otp_rate_limit(phone: str) -> bool:
+    phone = _normalize_phone(phone)
+    now = time.time()
+    timestamps = _otp_phone_rate.get(phone, [])
+    timestamps = [t for t in timestamps if now - t < OTP_RATE_WINDOW]
+    if len(timestamps) >= OTP_RATE_LIMIT:
+        _otp_phone_rate[phone] = timestamps
+        return False
+    timestamps.append(now)
+    _otp_phone_rate[phone] = timestamps
+    return True
+
+
+def get_user_email(phone: str) -> str | None:
     phone = _normalize_phone(phone)
     entry = _whitelist.get(phone)
     if not entry or not isinstance(entry, dict):
@@ -179,7 +229,7 @@ def get_user_email(phone):
     return entry.get("email")
 
 
-def mask_email(email):
+def mask_email(email: str | None) -> str | None:
     if not email or "@" not in email:
         return email
     local, domain = email.split("@", 1)
@@ -190,27 +240,36 @@ def mask_email(email):
     return "{}@{}".format(masked, domain)
 
 
-def create_otp(phone):
-    code = "{:05d}".format(secrets.randbelow(100000))
-    _otp_store[_normalize_phone(phone)] = {"code": code, "created": time.time()}
+def create_otp(phone: str, ip: str | None = None) -> str:
+    code = "{:06d}".format(secrets.randbelow(1000000))
+    with _otp_lock:
+        _otp_store[_normalize_phone(phone)] = {
+            "code": code,
+            "created": time.time(),
+            "ip": ip,
+        }
     return code
 
 
-def verify_otp(phone, code):
+def verify_otp(phone: str, code: str, ip: str | None = None) -> bool:
     phone = _normalize_phone(phone)
-    entry = _otp_store.get(phone)
-    if not entry:
+    with _otp_lock:
+        entry = _otp_store.get(phone)
+        if not entry:
+            return False
+        if time.time() - entry["created"] > OTP_TTL:
+            _otp_store.pop(phone, None)
+            return False
+        if entry.get("ip") and ip and entry["ip"] != ip:
+            _otp_store.pop(phone, None)
+            return False
+        if hmac.compare_digest(entry["code"], code):
+            _otp_store.pop(phone, None)
+            return True
         return False
-    if time.time() - entry["created"] > OTP_TTL:
-        _otp_store.pop(phone, None)
-        return False
-    if hmac.compare_digest(entry["code"], code):
-        _otp_store.pop(phone, None)
-        return True
-    return False
 
 
-def send_otp_email(to_email, code, from_email, smtp_password):
+def send_otp_email(to_email: str, code: str, from_email: str, smtp_password: str) -> None:
     msg = _MIMEText("Kod vhoda IoE: {}".format(code), "plain", "utf-8")
     msg["Subject"] = "IoE: kod vhoda"
     msg["From"] = from_email
