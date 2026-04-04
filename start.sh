@@ -92,7 +92,7 @@ if [ "$1" = "--claude" ] || [ "$1" = "claude" ]; then
 fi
 
 # Kill previous instance
-pkill -f "ioe_web.py $PORT" 2>/dev/null || true
+pkill -f "ioe_web.py" 2>/dev/null || true
 sleep 1
 
 echo "Starting IoE on http://localhost:$PORT"
