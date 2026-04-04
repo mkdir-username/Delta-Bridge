@@ -377,7 +377,8 @@ class Handler(BaseHTTPRequestHandler):
                         with open(f) as fh:
                             k = json.load(fh)
                             kits.append({"file": os.path.basename(f), "service": k.get("service", ""), "description": k.get("description", ""), "actions": list(k.get("actions", {}).keys())})
-                    except Exception:
+                    except Exception as e:
+                        log.warning("Kit load failed %s: %s", f, e)
                         continue
                 self.respond_json({"kits": kits})
                 return
