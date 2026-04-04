@@ -25,7 +25,7 @@ import truststore
 truststore.inject_into_ssl()
 
 from imapclient import IMAPClient
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from readability import Document
 from PIL import Image
 import requests
@@ -273,7 +273,9 @@ def _smart_extract_impl(url: str) -> dict[str, Any]:
                          "form", "input", "select", "fieldset", "legend", "label", "button"]):
             tag.decompose()
         for a in soup.find_all("a", href=True):
-            href = a["href"]
+            if not isinstance(a, Tag):
+                continue
+            href = str(a["href"])
             if href.startswith("/"):
                 a["href"] = "{}://{}{}".format(parsed_url.scheme, parsed_url.netloc, href)
         body = soup.find("body") or soup
@@ -321,7 +323,9 @@ def _smart_extract_impl(url: str) -> dict[str, Any]:
                      "form", "input", "select", "fieldset", "legend", "label", "button"]):
         tag.decompose()
     for a in soup.find_all("a", href=True):
-        href = a["href"]
+        if not isinstance(a, Tag):
+            continue
+        href = str(a["href"])
         if href.startswith("/"):
             a["href"] = "{}://{}{}".format(parsed_url.scheme, parsed_url.netloc, href)
     body = soup.find("body") or soup
@@ -348,11 +352,13 @@ def inline_images(html: str, base_url: str, max_images: int = 10, max_kb: int = 
     soup = BeautifulSoup(html, "html.parser")
     count = 0
     for img in soup.find_all("img", src=True):
+        if not isinstance(img, Tag):
+            continue
         if count >= max_images:
             img.decompose()
             continue
         try:
-            img_url = urljoin(base_url, img["src"])
+            img_url = urljoin(base_url, str(img["src"]))
             try:
                 validate_url(img_url)
             except ValueError:
@@ -370,7 +376,7 @@ def inline_images(html: str, base_url: str, max_images: int = 10, max_kb: int = 
             pil_img = Image.open(io.BytesIO(img_data))
             if pil_img.width > 800:
                 ratio = 800 / pil_img.width
-                pil_img = pil_img.resize((800, int(pil_img.height * ratio)))
+                pil_img = pil_img.resize((800, int(pil_img.height * ratio)))  # type: ignore[assignment]  # PIL typeshed
             buf = io.BytesIO()
             pil_img.convert("RGB").save(buf, "JPEG", quality=60)
             if buf.tell() > max_kb * 1024:
@@ -403,7 +409,8 @@ def extract_attachment(raw: bytes) -> Optional[bytes]:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
-            return part.get_payload(decode=True)
+            payload = part.get_payload(decode=True)
+            return payload if isinstance(payload, bytes) else None
     return None
 
 
