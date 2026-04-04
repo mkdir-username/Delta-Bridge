@@ -23,16 +23,18 @@ log = logging.getLogger("ioe-web")
 def imap_conn() -> imaplib.IMAP4_SSL:
     import ioe_web
     last_err = None
-    for attempt in range(3):
+    delays = [2, 5, 10, 20, 30]
+    for attempt in range(len(delays) + 1):
         try:
             m = imaplib.IMAP4_SSL(ioe_web.IMAP_HOST, 993)
             m.login(ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
             return m
         except Exception as e:
             last_err = e
-            if attempt < 2:
-                log.warning("IMAP login attempt %d failed: %s", attempt + 1, e)
-                time.sleep(2)
+            if attempt < len(delays):
+                delay = delays[attempt] + random.random() * delays[attempt] * 0.3
+                log.warning("IMAP login attempt %d failed: %s (retry in %.0fs)", attempt + 1, e, delay)
+                time.sleep(delay)
     raise last_err
 
 
@@ -73,7 +75,7 @@ def poll_response(user_id: str, req_id: str) -> None:
         seen_uids = set()
         for cycle in range(60):
             if cycle > 0:
-                time.sleep(1)
+                time.sleep(1 + random.random() * 0.6)
             m.noop()
             _, msgs = m.search(None, "ALL")
             if not msgs[0]:
@@ -111,8 +113,8 @@ def poll_response(user_id: str, req_id: str) -> None:
                         try:
                             m.store(uid, "+FLAGS", "\\Deleted")
                             m.expunge()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.debug("[%s] poll: cleanup failed: %s", req_id, e)
                         if "error" in response:
                             from handler import _classify_error
                             err_type, err_msg = _classify_error(response["error"])
@@ -137,8 +139,8 @@ def poll_response(user_id: str, req_id: str) -> None:
                         for old_uid in old[0].split():
                             m.store(old_uid, "+FLAGS", "\\Deleted")
                         m.expunge()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("[%s] poll: old mail cleanup: %s", req_id, e)
         elapsed = time.time() - t0
         log.warning("[%s] poll: TIMEOUT after %.0fs", req_id, elapsed)
         with ioe_web.lock:
