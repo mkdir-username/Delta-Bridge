@@ -19,26 +19,38 @@ from transport import imap_conn, send_request, poll_response
 
 log = logging.getLogger("ioe-web")
 
-_ERROR_MAP: list[tuple[_re.Pattern[str], str | None]] = [
-    (_re.compile(r"UNAVAILABLE", _re.I), "Сервер почты недоступен, попробуйте позже"),
-    (_re.compile(r"all available options.*already used", _re.I), "Слишком много попыток. Подождите 10 минут"),
-    (_re.compile(r"phone number is invalid", _re.I), "Неверный номер телефона"),
-    (_re.compile(r"session expired", _re.I), "Сессия истекла, войдите заново"),
-    (_re.compile(r"wait of (\d+) seconds", _re.I), None),
+_ERROR_MAP = [
+    (_re.compile(r"UNAVAILABLE", _re.I), "transport", "Сервер почты недоступен, попробуйте позже"),
+    (_re.compile(r"timeout", _re.I), "transport", None),
+    (_re.compile(r"Connection refused|Network is unreachable|ConnectionReset", _re.I), "transport", "Нет соединения с сервером"),
+    (_re.compile(r"session expired|not registered|auth.*required", _re.I), "auth", None),
+    (_re.compile(r"all available options.*already used", _re.I), "rate_limit", "Слишком много попыток. Подождите 10 минут"),
+    (_re.compile(r"wait of (\d+) seconds", _re.I), "rate_limit", None),
+    (_re.compile(r"phone number is invalid", _re.I), "vps", "Неверный номер телефона"),
 ]
 
 
-def _humanize_error(raw: object) -> str:
+def _classify_error(raw: object) -> tuple[str, str]:
     s = str(raw)
-    for pattern, msg in _ERROR_MAP:
+    for pattern, err_type, msg in _ERROR_MAP:
         m = pattern.search(s)
         if m:
             if msg is None:
-                secs = int(m.group(1))
-                mins = max(1, secs // 60)
-                return f"Подождите {mins} мин"
-            return msg
-    return "Ошибка сервера: {}".format(s)
+                if err_type == "rate_limit":
+                    try:
+                        secs = int(m.group(1))
+                        mins = max(1, secs // 60)
+                        return err_type, "Подождите {} мин".format(mins)
+                    except (IndexError, ValueError):
+                        pass
+                return err_type, s
+            return err_type, msg
+    return "vps", "Ошибка сервера: {}".format(s)
+
+
+def _humanize_error(raw: object) -> str:
+    _, msg = _classify_error(raw)
+    return msg
 
 _TG_ALLOWED_KEYS: set[str] = {"phone", "code", "password", "chat_id", "text", "limit",
                               "offset_id", "reply_to_id", "message_id", "folder", "query"}
