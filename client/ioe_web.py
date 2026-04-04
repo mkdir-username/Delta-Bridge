@@ -75,14 +75,15 @@ def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
     part.add_header("Content-Disposition", "attachment",
                     filename=random.choice(FILENAMES))
     msg.attach(part)
-    m.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]
+    m.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
 
 
 def extract_attachment(raw: bytes) -> bytes | None:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
-            return part.get_payload(decode=True)  # type: ignore[return-value]
+            payload = part.get_payload(decode=True)
+            return payload if isinstance(payload, bytes) else None
     return None
 
 
@@ -108,7 +109,10 @@ def poll_response(req_id: str) -> None:
             for uid in reversed(new_uids):
                 seen_uids.add(uid)
                 _, data = m.fetch(uid, "(RFC822)")
-                raw = data[0][1]  # type: ignore[index]
+                item = data[0]
+                if not isinstance(item, tuple):
+                    continue
+                raw = item[1]
                 if not isinstance(raw, bytes):
                     continue
                 att = extract_attachment(raw)
