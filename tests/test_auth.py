@@ -127,7 +127,7 @@ def test_otp_create_and_verify():
     auth._otp_store.clear()
     phone = "+79274918222"
     code = auth.create_otp(phone)
-    assert len(code) == 5
+    assert len(code) == 6
     assert code.isdigit()
     assert auth.verify_otp(phone, code) is True
     assert auth.verify_otp(phone, code) is False
@@ -145,7 +145,52 @@ def test_otp_wrong_code():
     auth._otp_store.clear()
     phone = "+79274918222"
     auth.create_otp(phone)
-    assert auth.verify_otp(phone, "00000") is False
+    assert auth.verify_otp(phone, "000000") is False
+
+
+def test_otp_six_digits():
+    auth._otp_store.clear()
+    code = auth.create_otp("+79274918222")
+    assert len(code) == 6
+    assert code.isdigit()
+
+
+def test_otp_ip_binding():
+    auth._otp_store.clear()
+    code = auth.create_otp("+79274918222", ip="1.2.3.4")
+    assert auth.verify_otp("+79274918222", code, ip="1.2.3.4") is True
+
+
+def test_otp_wrong_ip_rejected():
+    auth._otp_store.clear()
+    code = auth.create_otp("+79274918222", ip="1.2.3.4")
+    assert auth.verify_otp("+79274918222", code, ip="5.6.7.8") is False
+
+
+def test_otp_phone_rate_limit():
+    auth._otp_phone_rate.clear()
+    for _ in range(3):
+        assert auth.check_otp_rate_limit("+79274918222") is True
+    assert auth.check_otp_rate_limit("+79274918222") is False
+    assert auth.check_otp_rate_limit("+79006433340") is True
+
+
+def test_otp_phone_rate_limit_window():
+    auth._otp_phone_rate.clear()
+    phone = "+79274918222"
+    for _ in range(3):
+        auth.check_otp_rate_limit(phone)
+    assert auth.check_otp_rate_limit(phone) is False
+    auth._otp_phone_rate[auth._normalize_phone(phone)] = [
+        time.time() - 400, time.time() - 400, time.time() - 400
+    ]
+    assert auth.check_otp_rate_limit(phone) is True
+
+
+def test_otp_no_ip_still_works():
+    auth._otp_store.clear()
+    code = auth.create_otp("+79274918222")
+    assert auth.verify_otp("+79274918222", code) is True
 
 
 def test_get_user_email():
@@ -169,14 +214,64 @@ def test_verify_password_no_password_in_whitelist():
 
 
 def test_verify_password_correct():
-    auth._whitelist = {"+79274918222": {"email": "t@t.com", "password": "secret123"}}
+    import bcrypt
+    hashed = bcrypt.hashpw(b"secret123", bcrypt.gensalt()).decode()
+    auth._whitelist = {"+79274918222": {"email": "t@t.com", "password": hashed}}
     assert auth.verify_password("+79274918222", "secret123") is True
     assert auth.verify_password("+79274918222", "wrong") is False
+
+
+def test_hash_password_roundtrip():
+    import bcrypt
+    hashed = auth.hash_password("mypass")
+    assert bcrypt.checkpw(b"mypass", hashed.encode()) is True
+    assert bcrypt.checkpw(b"wrong", hashed.encode()) is False
 
 
 def test_verify_password_not_whitelisted():
     auth._whitelist = {}
     assert auth.verify_password("+79999999999", "any") is False
+
+
+def test_whitelist_integrity_check(tmp_path):
+    secret = "test-secret-key"
+    users = {"+79274918222": {"email": "test@test.com"}}
+    users_file = str(tmp_path / "users.json")
+    sig_file = str(tmp_path / "users.json.sig")
+
+    with open(users_file, "w") as f:
+        json.dump(users, f)
+    auth.sign_whitelist(users_file, secret)
+    assert os.path.exists(sig_file)
+
+    auth.load_whitelist(users_file, secret=secret)
+    assert auth.is_whitelisted("+79274918222")
+
+
+def test_whitelist_tampered_rejected(tmp_path):
+    import pytest as _pytest
+    secret = "test-secret-key"
+    users = {"+79274918222": {"email": "test@test.com"}}
+    users_file = str(tmp_path / "users.json")
+
+    with open(users_file, "w") as f:
+        json.dump(users, f)
+    auth.sign_whitelist(users_file, secret)
+
+    users["+79274918222"]["email"] = "hacker@evil.com"
+    with open(users_file, "w") as f:
+        json.dump(users, f)
+
+    with _pytest.raises(ValueError, match="integrity"):
+        auth.load_whitelist(users_file, secret=secret)
+
+
+def test_whitelist_no_sig_no_secret_ok(tmp_path):
+    users_file = str(tmp_path / "users.json")
+    with open(users_file, "w") as f:
+        json.dump({"+79274918222": {}}, f)
+    auth.load_whitelist(users_file)
+    assert auth.is_whitelisted("+79274918222")
 
 
 def test_send_otp_email():

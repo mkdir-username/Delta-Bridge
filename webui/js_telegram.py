@@ -7,6 +7,48 @@ var _tgCheckStarted = false;
 var _retryTimer = null;
 var _retryAttempt = 0;
 var _retryDelays = [5000, 15000, 30000, 60000];
+var tgAuthResult = null;
+var tgAuthStartTime = null;
+
+function bgCheckTgAuth() {
+  tgAuthStartTime = Date.now();
+  _tgCheckStarted = true;
+  fetch('/tg?action=check_auth')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'error') {
+        tgAuthResult = data.error_type === 'transport' ? 'transport_error' : 'wizard';
+        applyTgAuthIfVisible();
+        return;
+      }
+      if (data.status === 'pending') {
+        pollTgStatus(data.id, function(d) {
+          if (d.error_type === 'transport') { tgAuthResult = 'transport_error'; }
+          else if (d.authorized) { tgAuthResult = 'authorized'; }
+          else { tgAuthResult = 'wizard'; }
+          applyTgAuthIfVisible();
+        }, true);
+      } else if (data.authorized) {
+        tgAuthResult = 'authorized';
+        applyTgAuthIfVisible();
+      } else {
+        tgAuthResult = 'wizard';
+        applyTgAuthIfVisible();
+      }
+    })
+    .catch(function() {
+      tgAuthResult = 'transport_error';
+      applyTgAuthIfVisible();
+    });
+}
+
+function applyTgAuthIfVisible() {
+  if (document.getElementById('telegram-view').style.display === 'none') return;
+  _tgCheckStarted = false;
+  if (tgAuthResult === 'authorized') { _retryAttempt = 0; showTgMain(); loadDialogs(); }
+  else if (tgAuthResult === 'wizard') { showAuthWizard(); }
+  else if (tgAuthResult === 'transport_error') { showTransportError('Нет связи с сервером'); }
+}
 
 function makeLoadingHtml(msg) {
   var id = 'lt' + Date.now();
@@ -292,7 +334,10 @@ function pollNotifications() {
     .catch(function() {});
 }
 
-setInterval(pollNotifications, 5000);
+function scheduleNotifPoll() {
+  setTimeout(function() { pollNotifications(); scheduleNotifPoll(); }, 4000 + Math.random() * 2000);
+}
+scheduleNotifPoll();
 checkTgAuth();
 
 function _clearTgTimers() {
@@ -352,33 +397,36 @@ function showTgError(msg) {
 }
 
 function checkTgAuth() {
-  _tgCheckStarted = true;
+  if (tgAuthResult === 'authorized') { _retryAttempt = 0; showTgMain(); loadDialogs(); return; }
+  if (tgAuthResult === 'wizard') { showAuthWizard(); return; }
+  if (tgAuthResult === 'transport_error') { showTransportError('Нет связи с сервером'); return; }
   var ld = makeLoadingHtml('Проверка авторизации...');
-  document.getElementById('tg-chats').style.display = '';
-  document.getElementById('tg-chats').innerHTML = ld.html;
-  startLoadingTimer(ld.id);
-  fetch('/tg?action=check_auth')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.status === 'error') {
-        _clearTgTimers();
-        if (data.error_type === 'transport') showTransportError(data.error);
-        else showAuthWizard();
-        return;
-      }
-      if (data.status === 'pending') {
-        pollTgStatus(data.id, function(d) {
-          if (d.error_type === 'transport') showTransportError(d.error);
-          else if (d.authorized) { _retryAttempt = 0; showTgMain(); loadDialogs(); }
-          else showAuthWizard();
-        }, true);
-      } else if (data.authorized) {
-        _retryAttempt = 0; showTgMain(); loadDialogs();
-      } else {
-        showAuthWizard();
-      }
-    })
-    .catch(function() { _clearTgTimers(); showTransportError('Нет связи с сервером'); });
+  document.getElementById('tg-chats').textContent = '';
+  var container = document.createElement('div');
+  container.className = 'loading';
+  var spinner = document.createElement('div');
+  spinner.className = 'spinner';
+  container.appendChild(spinner);
+  var msg = document.createElement('div');
+  msg.textContent = 'Проверка авторизации...';
+  container.appendChild(msg);
+  var timer = document.createElement('div');
+  timer.className = 'timer';
+  timer.id = ld.id;
+  timer.textContent = '0.0s';
+  container.appendChild(timer);
+  document.getElementById('tg-chats').appendChild(container);
+  if (tgAuthStartTime) {
+    var offset = tgAuthStartTime;
+    var iv = setInterval(function() {
+      var el = document.getElementById(ld.id);
+      if (!el) { clearInterval(iv); return; }
+      el.textContent = ((Date.now() - offset) / 1000).toFixed(1) + 's';
+    }, 100);
+    tgTimers[ld.id] = iv;
+  } else {
+    startLoadingTimer(ld.id);
+  }
 }
 
 function showAuthWizard() {
@@ -484,6 +532,7 @@ function authCode() {
 function handleAuthCodeResult(data) {
   document.querySelector('#auth-step-code .auth-btn').textContent = 'Подтвердить';
   if (data.auth_status === 'authorized') {
+    tgAuthResult = 'authorized';
     showTgMain(); loadDialogs();
   } else if (data.auth_status === '2fa_required') {
     document.getElementById('auth-step-code').style.display = 'none';
@@ -524,10 +573,13 @@ function auth2FA() {
 function handleAuth2FAResult(data) {
   document.querySelector('#auth-step-2fa .auth-btn').textContent = 'Войти';
   if (data.auth_status === 'authorized') {
+    tgAuthResult = 'authorized';
     showTgMain(); loadDialogs();
   } else {
     document.getElementById('auth-2fa-error').textContent = data.error || 'Неверный пароль';
   }
 }
+
+bgCheckTgAuth();
 
 """
