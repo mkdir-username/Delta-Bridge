@@ -159,6 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/":
+            ioe_web.rebuild_html()
             body = ioe_web.HTML_PAGE.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

@@ -3,17 +3,28 @@ import os
 import sys
 import logging
 import threading
+import importlib
 from http.server import HTTPServer
 
 from crypto import derive_key
 
-from css import CSS
-from js_vendor import MARKED_JS
-from js_browser import JS_BROWSER
-from js_telegram import JS_TELEGRAM
-from js_claude import JS_CLAUDE
-from html_templates import HTML_TAB_BAR, HTML_BROWSER, HTML_TELEGRAM, HTML_CLAUDE
+import css
+import js_vendor
+import js_browser
+import js_telegram
+import js_claude
+import html_templates
 from handler import Handler
+
+CSS = css.CSS
+MARKED_JS = js_vendor.MARKED_JS
+JS_BROWSER = js_browser.JS_BROWSER
+JS_TELEGRAM = js_telegram.JS_TELEGRAM
+JS_CLAUDE = js_claude.JS_CLAUDE
+HTML_TAB_BAR = html_templates.HTML_TAB_BAR
+HTML_BROWSER = html_templates.HTML_BROWSER
+HTML_TELEGRAM = html_templates.HTML_TELEGRAM
+HTML_CLAUDE = html_templates.HTML_CLAUDE
 
 log = logging.getLogger("ioe-web")
 logging.basicConfig(
@@ -81,8 +92,12 @@ DEVICE_ID = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
 
 seen_notification_uids = set()
 
-HTML_PAGE = (
-    r"""<!DOCTYPE html>
+_ui_modules = [css, js_browser, js_telegram, js_claude, html_templates]
+
+
+def _build_html():
+    return (
+        r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -90,30 +105,41 @@ HTML_PAGE = (
 <title>IoE</title>
 <style>
 """
-    + CSS
-    + """
+        + css.CSS
+        + """
 </style>
 <script>
 """
-    + MARKED_JS
-    + """
+        + js_vendor.MARKED_JS
+        + """
 </script>
 """
-    + HTML_TAB_BAR
-    + HTML_BROWSER
-    + HTML_TELEGRAM
-    + HTML_CLAUDE
-    + """
+        + html_templates.HTML_TAB_BAR
+        + html_templates.HTML_BROWSER
+        + html_templates.HTML_TELEGRAM
+        + html_templates.HTML_CLAUDE
+        + """
 <script>
 """
-    + JS_BROWSER
-    + JS_TELEGRAM
-    + JS_CLAUDE
-    + """
+        + js_browser.JS_BROWSER
+        + js_telegram.JS_TELEGRAM
+        + js_claude.JS_CLAUDE
+        + """
 </script>
 </body>
 </html>"""
-)
+    )
+
+
+def rebuild_html():
+    global HTML_PAGE
+    for mod in _ui_modules:
+        importlib.reload(mod)
+    HTML_PAGE = _build_html()
+    return HTML_PAGE
+
+
+HTML_PAGE = _build_html()
 
 
 def main():
