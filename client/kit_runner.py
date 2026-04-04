@@ -12,7 +12,8 @@ class KitRunner:
 
     def load_kit(self, kit_path: str) -> dict[str, Any]:
         with open(kit_path) as f:
-            return json.load(f)
+            result: dict[str, Any] = json.load(f)
+            return result
 
     def run(self, kit: dict[str, Any], action_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         self.variables.update(params or {})

@@ -53,7 +53,7 @@ def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> str:
                     filename=random.choice(FILENAMES))
     msg.attach(part)
     m.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
-    return request_dict["id"]
+    return str(request_dict["id"])
 
 
 def extract_attachment(raw: bytes) -> bytes | None:
@@ -87,7 +87,7 @@ def wait_response(m: imaplib.IMAP4_SSL, req_id: str, timeout: int = 90) -> dict[
                 continue
             try:
                 decrypted = decrypt(IOE_KEY, att.decode("ascii").strip())
-                response = json.loads(decrypted)
+                response: dict[str, Any] = json.loads(decrypted)
                 if response.get("id") == req_id:
                     return response
             except Exception:

@@ -143,7 +143,7 @@ def _poll_response(req_id: str) -> dict[str, Any] | None:
                     continue
                 try:
                     decrypted = decrypt_decompress(IOE_KEY, att.decode("ascii").strip())
-                    response = json.loads(decrypted)
+                    response: dict[str, Any] = json.loads(decrypted)
                     if response.get("id") == req_id:
                         elapsed = time.time() - t0
                         log.info("[%s] response (%.1fs, cycle %d)", req_id, elapsed, cycle)
