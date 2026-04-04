@@ -3,6 +3,10 @@ var replyToId = null;
 var allDialogs = [];
 var currentFolder = 'user';
 var tgTimers = {};
+var _tgCheckStarted = false;
+var _retryTimer = null;
+var _retryAttempt = 0;
+var _retryDelays = [5000, 15000, 30000, 60000];
 
 function makeLoadingHtml(msg) {
   var id = 'lt' + Date.now();
@@ -27,7 +31,7 @@ function switchTab(tab) {
   document.getElementById('tab-browser').className = tab === 'browser' ? 'tab active' : 'tab';
   document.getElementById('tab-telegram').className = tab === 'telegram' ? 'tab active' : 'tab';
   document.getElementById('tab-claude').className = tab === 'claude' ? 'tab active' : 'tab';
-  if (tab === 'telegram') { checkTgAuth(); notifCount = 0; var b = document.getElementById('notif-badge'); if (b) b.style.display = 'none'; }
+  if (tab === 'telegram') { if (!_tgCheckStarted) checkTgAuth(); notifCount = 0; var b = document.getElementById('notif-badge'); if (b) b.style.display = 'none'; }
   if (tab === 'claude' && !claudeAuthorized) { checkClaudeAuth(); }
 }
 
@@ -39,22 +43,27 @@ function loadDialogs() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
-        pollTgStatus(data.id, function(d) { allDialogs = d.dialogs || []; renderFilteredDialogs(); });
+        pollTgStatus(data.id, function(d) {
+          if (d.error) { showTgError(d.error); }
+          else { allDialogs = d.dialogs || []; renderFilteredDialogs(); }
+        });
       } else if (data.dialogs) {
         allDialogs = data.dialogs;
         renderFilteredDialogs();
-      } else if (data.auth_required || (data.error && data.error.indexOf('not registered') !== -1)) {
+      } else if (data.error_type === 'auth' || data.auth_required || (data.error && data.error.indexOf('not registered') !== -1)) {
         showAuthWizard();
+      } else if (data.error_type === 'transport') {
+        showTransportError(data.error);
       } else if (data.error) {
-        document.getElementById('tg-chats').innerHTML = '<div class="tg-loading">' + escHtml(data.error) + '</div>';
+        showTgError(data.error);
       }
     })
     .catch(function(e) {
-      document.getElementById('tg-chats').innerHTML = '<div class="tg-loading">Error: ' + escHtml(String(e)) + '</div>';
+      showTgError(String(e));
     });
 }
 
-function pollTgStatus(id, callback) {
+function pollTgStatus(id, callback, isAuthRequest) {
   var attempts = 0;
   var poll = setInterval(function() {
     fetch('/status?id=' + id)
@@ -62,20 +71,23 @@ function pollTgStatus(id, callback) {
       .then(function(data) {
         if (data.status === 'ready') {
           clearInterval(poll);
-          if (data.auth_required) { showAuthWizard(); }
+          if (data.auth_required || data.error_type === 'auth') { showAuthWizard(); }
           else { callback(data); }
         }
         else if (data.status === 'error') {
           clearInterval(poll);
-          if (data.auth_required || (data.error && data.error.indexOf('not registered') !== -1)) {
-            showAuthWizard();
-          } else {
-            document.getElementById('tg-chats').innerHTML = '<div class="tg-loading">' + escHtml(data.error || 'unknown') + '</div>';
-          }
+          if (data.error_type === 'auth') { showAuthWizard(); }
+          else { callback({error: data.error || 'unknown', error_type: data.error_type || 'vps'}); }
         }
         if (++attempts > 30) {
           clearInterval(poll);
-          if (typeof showAuthWizard === 'function') showAuthWizard();
+          callback({error: 'Сервер не отвечает', error_type: 'transport'});
+        }
+      })
+      .catch(function() {
+        if (++attempts > 5) {
+          clearInterval(poll);
+          callback({error: 'Нет связи', error_type: 'transport'});
         }
       });
   }, 2000);
@@ -173,6 +185,9 @@ function openChat(chatId, el) {
     .then(function(data) {
       if (data.status === 'pending') pollTgStatus(data.id, renderMessages);
       else if (data.messages) renderMessages(data);
+    })
+    .catch(function() {
+      document.getElementById('tg-messages').textContent = 'Ошибка загрузки сообщений';
     });
   fetch('/tg?action=mark_read&chat_id=' + chatId);
 }
@@ -278,47 +293,139 @@ function pollNotifications() {
 }
 
 setInterval(pollNotifications, 5000);
+checkTgAuth();
+
+function _clearTgTimers() {
+  Object.keys(tgTimers).forEach(function(k) { clearInterval(tgTimers[k]); delete tgTimers[k]; });
+  if (_retryTimer) { clearInterval(_retryTimer); _retryTimer = null; }
+}
+
+function showTransportError(msg) {
+  _clearTgTimers();
+  var delay = _retryDelays[Math.min(_retryAttempt, _retryDelays.length - 1)];
+  var secs = Math.ceil(delay / 1000);
+  _retryAttempt++;
+  var el = document.getElementById('tg-chats');
+  el.style.display = '';
+  el.textContent = '';
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'padding:24px;color:var(--text-dim);text-align:center';
+  wrap.appendChild(document.createTextNode(msg || 'Сервер недоступен'));
+  var countdown = document.createElement('div');
+  countdown.style.cssText = 'margin-top:8px;font-size:12px';
+  countdown.textContent = 'Повтор через ' + secs + 's';
+  wrap.appendChild(countdown);
+  var btn = document.createElement('button');
+  btn.className = 'auth-btn';
+  btn.style.marginTop = '12px';
+  btn.textContent = 'Повторить сейчас';
+  btn.onclick = retryTgAuth;
+  wrap.appendChild(btn);
+  el.appendChild(wrap);
+  var remaining = secs;
+  _retryTimer = setInterval(function() {
+    remaining--;
+    countdown.textContent = 'Повтор через ' + remaining + 's';
+    if (remaining <= 0) { clearInterval(_retryTimer); _retryTimer = null; checkTgAuth(); }
+  }, 1000);
+}
+
+function retryTgAuth() {
+  if (_retryTimer) { clearInterval(_retryTimer); _retryTimer = null; }
+  checkTgAuth();
+}
+
+function showTgError(msg) {
+  var el = document.getElementById('tg-chats');
+  el.textContent = '';
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'padding:24px;color:var(--text-dim);text-align:center';
+  wrap.appendChild(document.createTextNode(msg || 'Ошибка'));
+  wrap.appendChild(document.createElement('br'));
+  var btn = document.createElement('button');
+  btn.className = 'auth-btn';
+  btn.style.marginTop = '12px';
+  btn.textContent = 'Повторить';
+  btn.onclick = function() { checkTgAuth(); };
+  wrap.appendChild(btn);
+  el.appendChild(wrap);
+}
 
 function checkTgAuth() {
+  _tgCheckStarted = true;
   var ld = makeLoadingHtml('Проверка авторизации...');
+  document.getElementById('tg-chats').style.display = '';
   document.getElementById('tg-chats').innerHTML = ld.html;
   startLoadingTimer(ld.id);
   fetch('/tg?action=check_auth')
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      if (data.status === 'error') {
+        _clearTgTimers();
+        if (data.error_type === 'transport') showTransportError(data.error);
+        else showAuthWizard();
+        return;
+      }
       if (data.status === 'pending') {
         pollTgStatus(data.id, function(d) {
-          if (d.authorized) { showTgMain(); loadDialogs(); }
+          if (d.error_type === 'transport') showTransportError(d.error);
+          else if (d.authorized) { _retryAttempt = 0; showTgMain(); loadDialogs(); }
           else showAuthWizard();
-        });
+        }, true);
       } else if (data.authorized) {
-        showTgMain(); loadDialogs();
+        _retryAttempt = 0; showTgMain(); loadDialogs();
       } else {
         showAuthWizard();
       }
     })
-    .catch(function() {
-      document.getElementById('tg-chats').innerHTML = '<div style="padding:24px;color:var(--text-dim);text-align:center">Нет связи с сервером<br><button class="auth-btn" onclick="checkTgAuth()" style="margin-top:12px">Повторить</button></div>';
-    });
+    .catch(function() { _clearTgTimers(); showTransportError('Нет связи с сервером'); });
 }
 
 function showAuthWizard() {
+  _clearTgTimers(); _tgCheckStarted = false;
   document.getElementById('tg-auth').style.display = '';
   document.getElementById('tg-chats').style.display = 'none';
   document.getElementById('tg-folders').style.display = 'none';
   var top = document.querySelector('.tg-sidebar-top');
   if (top) top.style.display = 'none';
+  var bot = document.getElementById('tg-sidebar-bottom'); if (bot) bot.style.display = 'none';
   document.getElementById('auth-step-phone').style.display = '';
   document.getElementById('auth-step-code').style.display = 'none';
   document.getElementById('auth-step-2fa').style.display = 'none';
 }
 
 function showTgMain() {
+  _clearTgTimers(); _tgCheckStarted = false;
   document.getElementById('tg-auth').style.display = 'none';
   document.getElementById('tg-chats').style.display = '';
   document.getElementById('tg-folders').style.display = '';
   var top = document.querySelector('.tg-sidebar-top');
   if (top) top.style.display = '';
+  var bot = document.getElementById('tg-sidebar-bottom'); if (bot) bot.style.display = '';
+}
+
+function logoutTelegram() {
+  if (!confirm('Выйти из Telegram?')) return;
+  var btn = document.getElementById('tg-logout-btn');
+  if (btn) btn.disabled = true;
+  fetch('/tg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'auth_logout'})})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'pending') { pollTgStatus(data.id, handleLogoutResult, true); }
+      else { handleLogoutResult(data); }
+    })
+    .catch(function() { handleLogoutResult({}); });
+}
+
+function handleLogoutResult() {
+  currentChatId = null;
+  replyToId = null;
+  allDialogs = [];
+  document.getElementById('tg-messages').textContent = '';
+  var btn = document.getElementById('tg-logout-btn');
+  if (btn) btn.disabled = false;
+  _tgCheckStarted = false;
+  showAuthWizard();
 }
 
 function authStart() {
@@ -331,7 +438,7 @@ function authStart() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
-        pollTgStatus(data.id, handleAuthStartResult);
+        pollTgStatus(data.id, handleAuthStartResult, true);
       } else {
         handleAuthStartResult(data);
       }
@@ -363,7 +470,7 @@ function authCode() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
-        pollTgStatus(data.id, handleAuthCodeResult);
+        pollTgStatus(data.id, handleAuthCodeResult, true);
       } else {
         handleAuthCodeResult(data);
       }
@@ -403,7 +510,7 @@ function auth2FA() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'pending') {
-        pollTgStatus(data.id, handleAuth2FAResult);
+        pollTgStatus(data.id, handleAuth2FAResult, true);
       } else {
         handleAuth2FAResult(data);
       }

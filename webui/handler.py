@@ -19,26 +19,38 @@ from transport import imap_conn, send_request, poll_response
 
 log = logging.getLogger("ioe-web")
 
-_ERROR_MAP: list[tuple[_re.Pattern[str], str | None]] = [
-    (_re.compile(r"UNAVAILABLE", _re.I), "Сервер почты недоступен, попробуйте позже"),
-    (_re.compile(r"all available options.*already used", _re.I), "Слишком много попыток. Подождите 10 минут"),
-    (_re.compile(r"phone number is invalid", _re.I), "Неверный номер телефона"),
-    (_re.compile(r"session expired", _re.I), "Сессия истекла, войдите заново"),
-    (_re.compile(r"wait of (\d+) seconds", _re.I), None),
+_ERROR_MAP = [
+    (_re.compile(r"UNAVAILABLE", _re.I), "transport", "Сервер почты недоступен, попробуйте позже"),
+    (_re.compile(r"timeout", _re.I), "transport", None),
+    (_re.compile(r"Connection refused|Network is unreachable|ConnectionReset", _re.I), "transport", "Нет соединения с сервером"),
+    (_re.compile(r"session expired|not registered|auth.*required", _re.I), "auth", None),
+    (_re.compile(r"all available options.*already used", _re.I), "rate_limit", "Слишком много попыток. Подождите 10 минут"),
+    (_re.compile(r"wait of (\d+) seconds", _re.I), "rate_limit", None),
+    (_re.compile(r"phone number is invalid", _re.I), "vps", "Неверный номер телефона"),
 ]
 
 
-def _humanize_error(raw: object) -> str:
+def _classify_error(raw: object) -> tuple[str, str]:
     s = str(raw)
-    for pattern, msg in _ERROR_MAP:
+    for pattern, err_type, msg in _ERROR_MAP:
         m = pattern.search(s)
         if m:
             if msg is None:
-                secs = int(m.group(1))
-                mins = max(1, secs // 60)
-                return f"Подождите {mins} мин"
-            return msg
-    return "Ошибка сервера: {}".format(s)
+                if err_type == "rate_limit":
+                    try:
+                        secs = int(m.group(1))
+                        mins = max(1, secs // 60)
+                        return err_type, "Подождите {} мин".format(mins)
+                    except (IndexError, ValueError):
+                        pass
+                return err_type, s
+            return err_type, msg
+    return "vps", "Ошибка сервера: {}".format(s)
+
+
+def _humanize_error(raw: object) -> str:
+    _, msg = _classify_error(raw)
+    return msg
 
 _TG_ALLOWED_KEYS: set[str] = {"phone", "code", "password", "chat_id", "text", "limit",
                               "offset_id", "reply_to_id", "message_id", "folder", "query"}
@@ -147,6 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/":
+            ioe_web.rebuild_html()
             body = ioe_web.HTML_PAGE.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -211,7 +224,8 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("[%s] send: done (%.1fs)", req_id, time.time() - t0)
             except Exception as e:
                 log.error("[%s] send: FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
             t.start()
@@ -254,7 +268,8 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] proxy send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -299,7 +314,8 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] tg send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -331,7 +347,8 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] claude send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -360,7 +377,8 @@ class Handler(BaseHTTPRequestHandler):
                         with open(f) as fh:
                             k = json.load(fh)
                             kits.append({"file": os.path.basename(f), "service": k.get("service", ""), "description": k.get("description", ""), "actions": list(k.get("actions", {}).keys())})
-                    except Exception:
+                    except Exception as e:
+                        log.warning("Kit load failed %s: %s", f, e)
                         continue
                 self.respond_json({"kits": kits})
                 return
@@ -389,7 +407,8 @@ class Handler(BaseHTTPRequestHandler):
                 m.logout()
             except Exception as e:
                 log.error("[%s] browser send FAILED: %s", req_id, e)
-                self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
                 return
 
             t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
@@ -421,7 +440,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         action = body.get("action", "")
-        if action not in ("auth_start", "auth_code", "check_auth"):
+        if action not in ("auth_start", "auth_code", "check_auth", "auth_logout"):
             self.respond_json({"status": "error", "error": "forbidden action"})
             return
 
@@ -476,7 +495,8 @@ class Handler(BaseHTTPRequestHandler):
             m.logout()
         except Exception as e:
             log.error("[%s] login/tg send FAILED: %s", req_id, e)
-            self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+            err_type, err_msg = _classify_error(str(e))
+            self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
             return
 
         _login_request_owners[req_id] = login_user_id
@@ -631,7 +651,8 @@ class Handler(BaseHTTPRequestHandler):
             m.logout()
         except Exception as e:
             log.error("[%s] tg POST send FAILED: %s", req_id, e)
-            self.respond_json({"status": "error", "error": _humanize_error(str(e))})
+            err_type, err_msg = _classify_error(str(e))
+            self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
             return
 
         t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)

@@ -385,7 +385,8 @@ def inline_images(html: str, base_url: str, max_images: int = 10, max_kb: int = 
             b64 = base64.b64encode(buf.getvalue()).decode()
             img["src"] = f"data:image/jpeg;base64,{b64}"
             count += 1
-        except Exception:
+        except Exception as e:
+            log.debug("Image inline failed: %s", e)
             img.decompose()
     return str(soup)
 
@@ -484,8 +485,8 @@ def handle_http_proxy(request: dict[str, Any]) -> dict[str, Any]:
                 extracted = smart_extract(url)
                 result["extracted"] = extracted
                 result["page_type"] = extracted.get("type", "page")
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("smart_extract failed for %s: %s", url, e)
 
         return result
     except Exception as e:
@@ -616,7 +617,8 @@ def process_message(client: Any, uid: int, raw: bytes) -> bool:
         blob = payload.decode("ascii").strip()
         try:
             decrypted = decrypt_decompress(IOE_KEY, blob)
-        except Exception:
+        except Exception as e:
+            log.debug("Primary decrypt failed, trying fallback: %s", e)
             decrypted = decrypt(IOE_KEY, blob)
         request = json.loads(decrypted)
     except Exception:

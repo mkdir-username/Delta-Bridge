@@ -185,6 +185,9 @@ HTML_TELEGRAM = """<div id="telegram-view" style="display:none">
       <div class="tg-chatlist" id="tg-chats">
         <div class="loading"><div class="spinner"></div><div>Loading chats...</div><div class="timer">0.0s</div></div>
       </div>
+      <div class="tg-sidebar-bottom" id="tg-sidebar-bottom">
+        <button id="tg-logout-btn" class="tg-logout-btn" onclick="logoutTelegram()">Выйти</button>
+      </div>
     </div>
     <div class="tg-main">
       <div class="tg-header">

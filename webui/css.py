@@ -469,6 +469,9 @@ footer .channel { color: var(--text-dim); }
 .tg-layout { display:flex; height:calc(100vh - 38px); }
 .tg-sidebar { width:30%; min-width:220px; max-width:320px; border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; }
 .tg-sidebar-top { padding:8px; border-bottom:1px solid var(--border); }
+.tg-sidebar-bottom { padding:8px; border-top:1px solid var(--border); }
+.tg-logout-btn { width:100%; padding:8px; background:none; border:1px solid var(--border); color:var(--text-dim); cursor:pointer; font-size:13px; border-radius:6px; font-family:var(--font-ui); }
+.tg-logout-btn:hover { color:var(--error); border-color:var(--error); }
 .tg-search { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:6px; font-family:var(--font-ui); font-size:13px; outline:none; box-sizing:border-box; }
 .tg-search:focus { border-color:var(--accent); }
 .tg-search::placeholder { color:var(--text-dim); }

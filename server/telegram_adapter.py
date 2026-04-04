@@ -80,6 +80,7 @@ class TelegramAdapter:
             "auth_start": self._auth_start,
             "auth_code": self._auth_code,
             "check_auth": self._check_auth,
+            "auth_logout": self._auth_logout,
         }
         handler = actions.get(action)
         if not handler:
@@ -302,3 +303,13 @@ class TelegramAdapter:
             return {"auth_status": "invalid_code"}
         except FloodWaitError as e:
             return {"auth_status": "flood_wait", "seconds": e.seconds}
+
+    def _auth_logout(self, client, params):
+        user_id = params.get("user_id", "default")
+        try:
+            self._run_sync(client.log_out())
+        except Exception as e:
+            log.warning("Telegram log_out for %s: %s", user_id, e)
+        self.clients.pop(user_id, None)
+        self._auth_state.pop(user_id, None)
+        return {"auth_status": "logged_out"}
