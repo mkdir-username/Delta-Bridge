@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import threading
+import webbrowser
 from http.server import HTTPServer
 
 from crypto import derive_key
@@ -116,7 +117,7 @@ HTML_PAGE = (
 )
 
 
-def main():
+def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8080
     for i, arg in enumerate(sys.argv):
         if arg == "--demo" and i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit():
@@ -134,7 +135,9 @@ def main():
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(("0.0.0.0", port), Handler)
     mode = " (demo)" if DEMO_MODE else ""
-    print("IoE WebUI{}: http://localhost:{}".format(mode, port))
+    url = "http://localhost:{}".format(port)
+    print("IoE WebUI{}: {}".format(mode, url))
+    threading.Timer(0.5, webbrowser.open, args=[url]).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
