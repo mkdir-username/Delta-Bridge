@@ -37,7 +37,8 @@ function handleAuthResult(data) {
     document.getElementById('claude-chat').style.display = '';
     updateClaudeModelLabel();
   } else {
-    document.querySelector('.claude-auth-desc').textContent = 'Not authorized';
+    var errText = data.error || data.message || 'Not authorized';
+    document.querySelector('.claude-auth-desc').textContent = errText;
     document.getElementById('claude-login-btn').style.display = '';
   }
 }
@@ -78,7 +79,9 @@ function handleLoginResult(data) {
     document.getElementById('claude-login-btn').style.display = '';
     document.getElementById('claude-login-btn').onclick = checkClaudeAuth;
   } else {
-    document.querySelector('.claude-auth-desc').textContent = data.error || 'Login failed';
+    var loginErr = data.error || data.message || 'Login failed';
+    if (data.raw_error) loginErr += '\n(' + data.raw_error + ')';
+    document.querySelector('.claude-auth-desc').textContent = loginErr;
     document.getElementById('claude-login-btn').style.display = '';
   }
 }

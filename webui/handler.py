@@ -34,7 +34,7 @@ def _humanize_error(raw):
                 mins = max(1, secs // 60)
                 return f"Подождите {mins} мин"
             return msg
-    return "Ошибка сервера, попробуйте позже"
+    return "Ошибка сервера: {}".format(s)
 
 _TG_ALLOWED_KEYS = {"phone", "code", "password", "chat_id", "text", "limit",
                      "offset_id", "reply_to_id", "message_id", "folder", "query"}
@@ -119,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
                         body = json.dumps(result, ensure_ascii=False).encode("utf-8")
                         self.send_response(200)
                         self.send_header("Content-Type", "application/json; charset=utf-8")
-                        self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/".format(sid))
+                        self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}".format(sid, auth.SESSION_TTL))
                         self.end_headers()
                         self.wfile.write(body)
                         return
@@ -173,10 +173,13 @@ class Handler(BaseHTTPRequestHandler):
                             result["format"] = resp.get("format", "html")
                         self.respond_json(result)
                     else:
-                        self.respond_json({
-                            "status": "error",
-                            "error": resp.get("error", "unknown"),
-                        })
+                        result = {"status": "error"}
+                        for key in resp:
+                            if key not in ("id", "status"):
+                                result[key] = resp[key]
+                        if "error" not in result:
+                            result["error"] = "unknown"
+                        self.respond_json(result)
                     return
             self.respond_json({"status": "pending"})
             return
@@ -477,6 +480,70 @@ class Handler(BaseHTTPRequestHandler):
         t.start()
         self.respond_json({"id": req_id, "status": "pending"})
 
+    def _handle_login_email_post(self):
+        import ioe_web
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(content_length) if content_length else b"{}"
+        try:
+            body = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            self.respond_json({"status": "error", "error": "invalid JSON"}, 400)
+            return
+
+        action = body.get("action", "")
+        phone = body.get("phone", "")
+
+        if action == "send_code":
+            if not auth.is_whitelisted(phone):
+                time.sleep(2)
+                self.respond_json({"status": "code_sent"})
+                return
+
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self.respond_json({"status": "error", "error": "Подождите минуту"})
+                return
+
+            email_addr = auth.get_user_email(phone)
+            if not email_addr:
+                self.respond_json({"status": "error", "error": "Email не настроен"})
+                return
+
+            code = auth.create_otp(phone)
+            try:
+                auth.send_otp_email(email_addr, code, ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
+            except Exception as e:
+                log.error("SMTP failed: %s", e)
+                self.respond_json({"status": "error", "error": "Ошибка отправки email"})
+                return
+
+            self.respond_json({"status": "code_sent", "email": auth.mask_email(email_addr)})
+            return
+
+        if action == "verify_code":
+            code = body.get("code", "")
+            if not code or not phone:
+                self.respond_json({"status": "error", "error": "Введите код"})
+                return
+
+            if auth.verify_otp(phone, code):
+                sid = auth.create_session(phone)
+                result = {"status": "authorized"}
+                body_bytes = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}".format(sid, auth.SESSION_TTL))
+                self._add_security_headers()
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+
+            self.respond_json({"status": "error", "error": "Неверный код"})
+            return
+
+        self.respond_json({"status": "error", "error": "unknown action"})
+
     def do_POST(self):
         import ioe_web
         from transport import imap_conn, send_request, poll_response
@@ -497,10 +564,14 @@ class Handler(BaseHTTPRequestHandler):
                 sid = auth.create_session(username)
                 self.send_response(302)
                 self.send_header("Location", "/")
-                self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/".format(sid))
+                self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}".format(sid, auth.SESSION_TTL))
                 self.end_headers()
             else:
                 self._serve_login("Неверный логин или пароль")
+            return
+
+        if parsed.path == "/login/email":
+            self._handle_login_email_post()
             return
 
         if parsed.path == "/login/tg":

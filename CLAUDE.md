@@ -1,172 +1,174 @@
-# Delta-Bridge (IoE — Internet over Email)
+## Bypass Infrastructure — Многослойная архитектура обхода
 
-IMAP-туннель для веб-трафика в ограниченных сетях. Клиент шифрует запрос AES-256-GCM, кладёт как PDF-аттач в IMAP-папку `IoE`, сервер забирает, исполняет, отвечает через INBOX.
+Delta-Bridge (IoE) — один слой из четырёх. Агент ОБЯЗАН понимать общую архитектуру чтобы не принимать решения в вакууме.
 
-## Threat Model — ЧИТАЙ ПЕРВЫМ
+### Слои защиты (defense in depth)
 
-Проект работает в условиях государственной цензуры (РФ). Это определяет ВСЕ архитектурные решения.
+| Слой | Инструмент | Когда работает | Когда ломается |
+|------|-----------|---------------|----------------|
+| L1 — DPI bypass | zapret2 / tpws | DPI блокирует протоколы, IP доступны | IP-блокировка, whitelist-режим |
+| L2 — VPN tunnel | NaiveProxy (primary), VLESS+Reality (backup) | IP VPS доступен | VPS IP заблокирован, whitelist |
+| L3 — CDN tunnel | VLESS+WS+TLS через Cloudflare | Cloudflare IP в whitelist | Cloudflare заблокирован (маловероятно) |
+| L4 — Email tunnel | **Delta-Bridge (IoE)** | Только IMAP жив | IMAP к Yandex заблокирован |
 
-- **Противник:** РКН + ТСПУ (DPI на всех магистралях) + ФСБ (доступ к данным российских сервисов) + ISP (логирование соединений)
-- **Yandex Mail** = транспорт, НЕ доверенный сервис. Payload зашифрован E2E, Yandex видит только метаданные.
-- **VPS** в Нидерландах (Амстердам). Ноль компонентов на российских серверах.
-- **Цель:** Работать при whitelist-режиме (когда разрешён только email-протокол)
+**Правило:** Каждый слой автономен. Падение L2 не затрагивает L4. Решения в рамках одного слоя НЕ ДОЛЖНЫ создавать зависимость от другого.
 
-## Security Decision Rules — НЕ СПРАШИВАЙ, ВЫБИРАЙ
+### Текущая инфраструктура
 
-При выборе между вариантами реализации — ВСЕГДА выбирай более безопасный. Не предлагай "простой (без защиты)" как вариант.
+| Компонент | Где | Адрес / Домен | Статус |
+|-----------|-----|---------------|--------|
+| Exit node (VPS) | Amsterdam, Cloudzy | 107.189.26.252 / gazorpazorp.xyz | ✅ Работает |
+| Relay (domestic hop) | SPb, Beget | 155.212.218.50 | ✅ Работает |
+| DNS + CDN | Cloudflare | gazorpazorp.xyz (orange cloud, Full strict) | ✅ Настроен |
+| IMAP transport | Yandex Mail | cherbadenis1@yandex.ru | ✅ Работает |
+| DPI bypass | Телефон (Termux) | zapret2/tpws | ✅ Работает |
+| NaiveProxy server | Amsterdam VPS | Caddy 2.11.2 + forwardproxy@naive :8443 | ✅ Работает |
+| NaiveProxy client (desktop) | Локально | CLI naive v143 → :8443 | ✅ Работает |
+| NaiveProxy client (Android) | Телефон | Exclave 0.17.30 + naive plugin v143 | ✅ Работает |
+| VLESS+Reality (Android) | Телефон | AmneziaVPN / v2rayNG | ✅ Работает (backup) |
+| CDN tunnel (Cloudflare) | — | VLESS+WS+TLS | ⏸ Pending recon |
+| IoE Plan B | — | Dual-mailbox Yandex+Gmail | 💤 Dormant |
 
-| Развилка | ВСЕГДА выбирай | НИКОГДА не предлагай |
-|----------|----------------|---------------------|
-| С паролем / без пароля | С паролем | "Простой вариант без пароля" |
-| Шифровать / не шифровать | Шифровать | "Можно без шифрования для простоты" |
-| Хранить на сервере / на клиенте | На клиенте (если возможно) | "Храним credentials на VPS в plaintext" |
-| Логировать / не логировать PII | Не логировать | "Запишем user_id в лог для отладки" |
-| Российский сервис / зарубежный | Зарубежный (для хранения/обработки) | "Можно через Mail.ru — там проще API" |
-| Plausible deniability / нет | С plausible deniability | "Назовём endpoint /vpn-bypass" |
-| Минимум метаданных / больше метаданных | Минимум | "Добавим User-Agent с версией IoE" |
-| Изоляция пользователей / shared state | Изоляция | "Общий session для всех пользователей" |
-
-**Правило:** Если вопрос имеет очевидный ответ с точки зрения безопасности/анонимности — не спрашивай, делай. Спрашивай только когда trade-off неочевиден (производительность vs безопасность при конкретных ограничениях).
-
-## Stack
-
-Python 3, без фреймворков. Фронтенд — Python string literals (CSS/JS/HTML), сборки нет.
-
-| Зависимость | Роль |
-|-------------|------|
-| imapclient / imaplib | IMAP транспорт |
-| pycryptodome | AES-256-GCM |
-| playwright | Headless Chromium (server) |
-| telethon | Telegram MTProto (server) |
-| requests | HTTP проксирование |
-| beautifulsoup4 / trafilatura / readability | Извлечение контента |
-| duckduckgo-search | Веб-поиск |
-
-## Structure
+### Каскад подключения (клиент → интернет)
 
 ```
-server/
-  server.py              # VPS daemon — IMAP poll + dispatch_request()
-  browser_handler.py     # Playwright BrowserPool, 6 browser actions
-  telegram_adapter.py    # Telethon multi-user Telegram
-  crypto.py              # AES-256-GCM (canonical source)
-client/
-  client.py              # CLI: get/text/search/update
-  kit_runner.py          # JSON-рецепты (Service Kits)
-  ioe_web.py             # Legacy WebUI (deprecated → webui/)
-  crypto.py
-webui/
-  ioe_web.py             # Entry: HTTPServer :8080
-  handler.py             # HTTP routes (do_GET)
-  transport.py           # IMAP send/poll
-  html_templates.py      # HTML (табы, панели)
-  css.py                 # CSS
-  js_browser.py          # JS браузер-таба
-  js_telegram.py         # JS Telegram-таба
-  js_vendor.py           # Bundled marked.js
-  crypto.py
-kits/
-  hackernews.json        # HN recipe
-  _template_auth.json    # Шаблон auth-рецепта
-tests/                   # pytest
-docs/
-  SERVICE_KIT_SPEC.md    # Спека JSON-рецептов
+Телефон → [zapret2 DPI bypass] → Beget SPb (relay) → Amsterdam VPS → Internet
+                                      ↑ внутренний трафик       ↑ невидим для оператора
 ```
 
-## Commands
+Двухопный каскад: мобильный оператор видит подключение к российскому IP (Beget). Подключение к голландскому VPS происходит server-side, оператор его не видит.
 
-| Команда | Назначение |
-|---------|-----------|
-| `bash start.sh` | Запуск WebUI |
-| `python server/server.py` | Серверный daemon |
-| `python client/client.py get <url>` | CLI fetch |
-| `pytest tests/` | Тесты |
+## Android Proxy Client — Приоритеты и решения
 
-## Entry Points
+### Почему NaiveProxy > VLESS+Reality
 
-| Точка входа | Файл | Функция |
-|-------------|------|---------|
-| Server daemon | `server/server.py` | `main()` |
-| WebUI | `webui/ioe_web.py` | `main()` |
-| CLI | `client/client.py` | `main()` |
-| Request dispatch | `server/server.py` | `dispatch_request()` |
-| HTTP routing | `webui/handler.py` | `do_GET()` |
-| Kit execution | `client/kit_runner.py` | `KitRunner.run()` |
+| Критерий | NaiveProxy | VLESS+Reality |
+|----------|-----------|---------------|
+| TLS fingerprint | **Настоящий** Chromium stack | Эмуляция Chrome (uTLS) |
+| Active probing resistance | Caddy = реальный веб-сервер | Xray проксирует чужой TLS |
+| IP↔SNI mismatch | Нет (свой домен) | google.com на не-google IP |
+| Устойчивость при эскалации DPI | Высокая (нечего детектировать) | Средняя (эмуляция детектируема) |
+| Текущий статус на ТСПУ | Проходит | Проходит |
 
-## HTTP Routes (webui/handler.py)
+**Вывод:** Оба работают сейчас. NaiveProxy устойчивее при эскалации. VLESS = backup, не мусор.
 
-| Route | Назначение |
-|-------|-----------|
-| `GET /` | SPA |
-| `GET /status?id=` | Poll pending response |
-| `GET /get?url=` | Reader mode fetch |
-| `GET /text?url=` | Plain text fetch |
-| `GET /search?q=` | DuckDuckGo search |
-| `GET /proxy?method=&url=&body=` | Raw HTTP proxy |
-| `GET /tg?action=` | Telegram relay |
-| `GET /browser?url=` | Headless browser |
-| `GET /notifications` | Telegram push queue |
-| `GET /kit?kit=` | List kits |
+### Решение для Android: Exclave + naive plugin
 
-## Request Types (server/server.py)
+**Стандартный sing-box for Android (SFA) НЕ включает naive outbound.** Требуется build tag `with_naive` + libcronet. Кастомная сборка нецелесообразна.
 
-| type/cmd | Handler |
-|----------|---------|
-| `type=http` | `handle_http_proxy()` |
-| `type=browser` | `handle_browser_request()` (Playwright) |
-| `type=command, service=telegram` | `TelegramAdapter.handle()` |
-| `type=session_start/end` | requests.Session management |
-| `cmd=SEARCH` | `do_search()` (DuckDuckGo) |
-| `cmd=TEXT` | Plain text fetch |
-| `cmd=GET` | `smart_extract()` (trafilatura → BS4) |
-| `cmd=UPDATE` | Self-update |
+**Рабочий путь:**
 
-## Architecture
+| Шаг | Действие | Источник |
+|-----|----------|---------|
+| 1 | Установить Exclave (хост-приложение) | GitHub: `dyhkwong/Exclave/releases` или F-Droid |
+| 2 | Установить NaïveProxy plugin APK | GitHub: `klzgrad/naiveproxy/releases` → `naiveproxy-plugin-*-arm64-v8a.apk` |
+| 3 | Создать NaïveProxy профиль в Exclave | Server: `gazorpazorp.xyz:8443`, Protocol: HTTPS, auth: из Caddyfile |
+| 4 | Проверить: заблокированный сайт открывается | — |
 
-- Async message queue over IMAP — нет прямого TCP между клиентом и сервером
-- Все write-endpoints async: возвращают `{"id", "status": "pending"}`, фронт поллит `/status`
-- Threading: `pending` dict + `threading.Lock`
-- crypto.py дублируется в server/, client/, webui/, tests/ — идентичный код
+**Exclave** = форк SagerNet (dyhkwong), активно поддерживается (обновления еженедельно), F-Droid + GitHub releases, 1.6k stars. Плагин naive автоматически обнаруживается через `ACTION_NATIVE_PLUGIN` intent.
 
-## Coder Navigation
+### Чего НЕ делать
 
-| Задача | Куда |
-|--------|------|
-| Новый HTTP endpoint | `webui/handler.py` → `do_GET()` |
-| Новая серверная команда | `server/server.py` → `dispatch_request()` |
-| Browser action | `server/browser_handler.py` → `handle_browser_request()` |
-| Telegram функция | `server/telegram_adapter.py` → `handle()` |
-| Новый Service Kit | `kits/*.json` по `docs/SERVICE_KIT_SPEC.md` |
-| UI таб/компонент | `webui/html_templates.py` + `webui/js_*.py` + `webui/css.py` |
-| Шифрование | `server/crypto.py` (canonical) |
-| Тесты | `tests/test_*.py` |
+| ❌ Не делай | ✅ Делай вместо | Почему |
+|------------|----------------|--------|
+| Собирать sing-box с naive из исходников | Использовать Exclave + plugin | Готовое решение, часы vs минуты |
+| Писать naive-клиент с нуля | Upstream plugin = настоящий Chromium stack | Месяцы работы на воспроизведение существующего |
+| Ломать VLESS конфиг | Держать VLESS параллельно | VLESS = рабочий backup |
+| Трогать серверную сторону | Caddy + forwardproxy уже работает | Серверная сторона стабильна (Caddy 2.11.2, forwardproxy@naive) |
+| Использовать SagerNet (оригинальный) | Только Exclave | SagerNet archived, не поддерживается |
 
-## Naming & Steganography
+### Целевая архитектура Android
 
-Всё что видно снаружи (email subjects, filenames, endpoint names, error messages) — должно выглядеть безобидно.
+```
+Exclave (единое приложение)
+  ├── NaiveProxy profile → gazorpazorp.xyz:8443 (PRIMARY) ✅
+  ├── VLESS+Reality profile → gazorpazorp.xyz:443 (BACKUP) ✅
+  └── Переключение вручную (один VPN активен)
+```
 
-| Компонент | Правильно | Неправильно |
-|-----------|-----------|-------------|
-| Email subject | "Re: Встреча 4f8a2b1c" | "IoE Request #42" |
-| Attachment | "report.pdf" | "encrypted_payload.bin" |
-| Email body | "см. вложение" | "" (пустое = подозрительно) |
-| Endpoint path | `/get?url=` | `/bypass-censorship?target=` |
-| Error в логах | "decrypt failed, skipping" | "censorship bypass error" |
-| Имя проекта в коде | Нейтральные имена функций | `class CensorshipBypass` |
+Один клиент, два протокола. Пользователь: только Denis.
 
-## Config
+### Caddy forwardproxy — критичные правила конфига
 
-`.env`: `EMAIL`, `IMAP_PASSWORD`, `IOE_SECRET`
+| Правило | Почему |
+|---------|--------|
+| `:PORT, domain.tld` в адресе серверного блока | Bare `:PORT` = catch-all для CONNECT к любым хостам. Без него forward_proxy не матчит CONNECT |
+| `order forward_proxy before file_server` | Без этого file_server перехватывает CONNECT → 405 или пустой ответ |
+| `admin off` | VPS без резолва localhost → Caddy падает при старте |
+| Сборка: `xcaddy build --with ...forwardproxy=...klzgrad/forwardproxy@naive` | Стандартный forwardproxy НЕ поддерживает naive padding → `padding type: None` → не работает |
 
-## Anti-Patterns — НЕ ДЕЛАЙ
+Текущий рабочий Caddyfile:
+```
+{
+  admin off
+  order forward_proxy before file_server
+  http_port 80
+  https_port 8443
+}
 
-| ❌ Не делай | ✅ Делай вместо |
-|------------|----------------|
-| Предлагать варианты с разным уровнем безопасности | Выбирать безопасный вариант, объяснить trade-off если есть |
-| Спрашивать "с паролем или без?" | Реализовывать с паролем |
-| Хранить секреты в коде | `.env` + `os.environ` |
-| Логировать содержимое запросов | Логировать только req_id, тип, статус, тайминг |
-| Добавлять идентифицирующие заголовки | Минимальные generic headers |
-| Называть вещи своими именами в коде | Нейтральная терминология |
-| Спрашивать "нужна ли аутентификация?" | Аутентификация нужна всегда |
-| Предлагать отправку данных на российские серверы | Все данные — только через зашифрованный канал на VPS в НЛ |
+:8443, gazorpazorp.xyz {
+  forward_proxy {
+    basic_auth user_0 PASSWORD
+    hide_ip
+    hide_via
+    probe_resistance
+  }
+}
+```
+
+## Collaborator Context
+
+| Пользователь | Уровень | Доступ | Обновления |
+|-------------|---------|--------|-----------|
+| Denis | Разработчик, SSH, CLI, полный доступ | Все слои | Самостоятельно |
+| Камила | Нетехнический, только WebUI | L4 (IoE) через WebUI | Через UPDATE command или простые инструкции |
+
+При проектировании фич для IoE (Delta-Bridge) — учитывать что Камила = нетехнический пользователь. UX > фичи. Для VPN-слоя (L2) — только Denis, UX неважен.
+
+## Recon-First Principle
+
+**НЕ строй инфраструктуру на непроверенных предположениях.**
+
+| Компонент | Допущение | Статус верификации | Блокирует |
+|-----------|-----------|-------------------|-----------|
+| CDN tunnel | Cloudflare IP в whitelist при whitelist-режиме | ⏸ Ждёт `recon.sh` при следующем whitelist-event | Деплой VLESS+WS+TLS |
+| IoE Plan B | Yandex начнёт блокировать иностранный IMAP | 💤 Мониторинг | Dual-mailbox migration |
+| Exclave + naive | Plugin работает с текущим сервером | ✅ Верифицировано 2026-04-04 | — |
+
+`recon.sh` — 8-фазный POSIX-скрипт, задеплоен на телефон через Termux. Запускать при whitelist-event для сбора данных о доступности Cloudflare/CDN IP.
+
+## Regulatory Threat Monitor
+
+### Аналитический фильтр (применять ВСЕГДА при оценке новостей)
+
+| Сигнал | Интерпретация |
+|--------|--------------|
+| Тема в публичном дискурсе + официальное отрицание | Процесс запущен. "Не будет" = "объявим позже" |
+| Несколько деловых изданий с "неподтверждённой информацией" | Контролируемая утечка / зондирование реакции |
+| "Административная ответственность за обход" на совещаниях | Стадия Овертона: "приемлемо" → следующий шаг "разумно" (законопроект) |
+| Лимит на международный трафик (>15GB) | Затрагивает L2 (VPN к VPS). НЕ затрагивает L4 (IMAP к Yandex = внутренний) |
+
+### Оценка воздействия новых блокировок
+
+При любой новости о блокировках — прогнать через таблицу:
+
+| Слой | Вопрос | Если "да" — действие |
+|------|--------|---------------------|
+| L1 zapret2 | Новый DPI-паттерн ломает обход? | Обновить zapret2, проверить tpws конфиг |
+| L2 NaiveProxy | VPS IP заблокирован? Протокол заблокирован? | Ротация IP или переход на CDN tunnel (L3) |
+| L2 VLESS | Reality fingerprint детектируется? | Переход на NaiveProxy как primary |
+| L3 CDN | Cloudflare IP заблокированы? | Активация IoE (L4) |
+| L4 IoE | IMAP к Yandex заблокирован? | Активация Plan B (dual-mailbox) |
+
+## Security Evaluation Checklist — Новые решения
+
+При предложении ЛЮБОГО нового инструмента/протокола/подхода — обязательно:
+
+- [ ] **Fingerprint:** Как выглядит на DPI? Отличимо от легитимного трафика?
+- [ ] **Метаданные:** Что утекает? Кому?
+- [ ] **Юрисдикция:** Где данные? Кто может запросить?
+- [ ] **Блокируемость:** Насколько легко РКН заблокировать (IP, протокол, SNI)?
+- [ ] **Plausible deniability:** Есть легитимное объяснение?
+- [ ] **Распространяемость:** Можно дать нетехническому пользователю?
+- [ ] **Resilience:** Что при отказе? Есть fallback?
+- [ ] **Слепые зоны РКН:** Канал/протокол ниже порога мониторинга?

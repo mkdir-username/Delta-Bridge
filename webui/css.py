@@ -561,8 +561,8 @@ footer .channel { color: var(--text-dim); }
 LOGIN_CSS = """\
 .login-wrap { max-width:300px; margin:20vh auto; text-align:center; }
 .login-logo { font-size:48px; margin-bottom:8px; }
-.login-title { font-size:24px; letter-spacing:8px; color:var(--text-dim); }
-.login-subtitle { font-size:11px; letter-spacing:4px; color:var(--text-dim); margin-bottom:32px; }
+.login-title { font-size:28px; font-weight:300; letter-spacing:2px; color:var(--text-main); }
+.login-subtitle { font-size:12px; letter-spacing:1px; color:var(--text-dim); margin-bottom:32px; }
 .login-form input { display:block; width:100%; padding:10px 12px; margin-bottom:8px; background:var(--bg-surface); border:1px solid #222; border-radius:6px; color:var(--text-main); font-size:14px; }
 .login-form input:focus { outline:none; border-color:var(--accent); }
 .login-form button { width:100%; padding:10px; margin-top:4px; background:var(--accent); border:none; color:#fff; border-radius:6px; cursor:pointer; font-size:14px; }

@@ -124,6 +124,7 @@ def main():
             break
     import auth
     auth.load_whitelist()
+    auth.init_sessions()
     if not auth._whitelist:
         print("\n" + "=" * 60)
         print("WARNING: WHITELIST EMPTY — no users can log in!")
