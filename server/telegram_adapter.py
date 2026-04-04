@@ -1,10 +1,13 @@
 """Telegram adapter: Telethon wrapper for IoE commands."""
+from __future__ import annotations
+
 import os
 import asyncio
 import logging
 import threading
 import time
 from datetime import datetime
+from typing import Any, Callable
 
 log = logging.getLogger("ioe.telegram")
 
@@ -18,35 +21,35 @@ except ImportError:
 
 
 class TelegramAdapter:
-    def __init__(self, api_id=None, api_hash=None, session_path=None):
+    def __init__(self, api_id: int | None = None, api_hash: str | None = None, session_path: str | None = None) -> None:
         if not TELETHON_AVAILABLE:
             raise ImportError("telethon not installed")
-        self.api_id = api_id or int(os.environ.get("TG_API_ID", "0"))
-        self.api_hash = api_hash or os.environ.get("TG_API_HASH", "")
-        self.session_path = session_path or os.environ.get("TG_SESSION", "ioe_telegram")
-        self.clients = {}
-        self.client = None
-        self.loop = None
-        self._thread = None
-        self._auth_state = {}
-        self._last_notify = {}
-        self._notify_interval = 10
+        self.api_id: int = api_id or int(os.environ.get("TG_API_ID", "0"))
+        self.api_hash: str = api_hash or os.environ.get("TG_API_HASH", "")
+        self.session_path: str = session_path or os.environ.get("TG_SESSION", "ioe_telegram")
+        self.clients: dict[str, Any] = {}
+        self.client: Any | None = None
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._auth_state: dict[str, dict[str, str]] = {}
+        self._last_notify: dict[str, float] = {}
+        self._notify_interval: int = 10
 
-    def start(self):
+    def start(self) -> None:
         self.loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         log.info("Telegram event loop started")
 
-    def _run_loop(self):
+    def _run_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
+        self.loop.run_forever()  # type: ignore[union-attr]
 
-    def _run_sync(self, coro):
-        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+    def _run_sync(self, coro: Any) -> Any:
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)  # type: ignore[arg-type]
         return future.result(timeout=30)
 
-    def _get_client(self, user_id):
+    def _get_client(self, user_id: str) -> Any:
         if user_id not in self.clients:
             session_path = "ioe_telegram_{}".format(user_id)
             client = TelegramClient(session_path, self.api_id, self.api_hash, loop=self.loop)
@@ -54,17 +57,17 @@ class TelegramAdapter:
             self.clients[user_id] = client
         return self.clients[user_id]
 
-    def is_authorized(self, user_id="default"):
+    def is_authorized(self, user_id: str = "default") -> bool:
         if user_id not in self.clients:
             return False
         client = self.clients[user_id]
         return self._run_sync(client.is_user_authorized())
 
-    def _check_auth(self, client, params):
+    def _check_auth(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         user_id = params.get("user_id", "default")
         return {"authorized": self.is_authorized(user_id)}
 
-    def handle(self, action, params):
+    def handle(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
         actions = {
             "get_dialogs": self._get_dialogs,
             "get_messages": self._get_messages,
@@ -94,7 +97,7 @@ class TelegramAdapter:
             log.error("Telegram action %s failed: %s", action, e)
             return {"status": 500, "error": str(e)}
 
-    def start_listener(self, user_id, notify_callback):
+    def start_listener(self, user_id: str, notify_callback: Callable[[dict[str, Any]], None]) -> None:
         client = self._get_client(user_id)
         if not self._run_sync(client.is_user_authorized()):
             return
@@ -128,7 +131,7 @@ class TelegramAdapter:
         client.add_event_handler(_on_new_message, events.NewMessage(incoming=True))
         log.info("Telegram listener started for user_id=%s", user_id)
 
-    def _get_dialogs(self, client, params):
+    def _get_dialogs(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         limit = params.get("limit", 20)
 
         async def _fetch():
@@ -158,7 +161,7 @@ class TelegramAdapter:
         dialogs = self._run_sync(_fetch())
         return {"dialogs": dialogs}
 
-    def _get_unread(self, client, params):
+    def _get_unread(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         limit = params.get("limit", 50)
 
         async def _fetch():
@@ -171,7 +174,7 @@ class TelegramAdapter:
         unread = self._run_sync(_fetch())
         return {"unread_chats": unread}
 
-    def _get_messages(self, client, params):
+    def _get_messages(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         chat_id = params.get("chat_id")
         limit = params.get("limit", 20)
 
@@ -196,7 +199,7 @@ class TelegramAdapter:
         messages = self._run_sync(_fetch())
         return {"messages": messages}
 
-    def _send_message(self, client, params):
+    def _send_message(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         chat_id = params.get("chat_id")
         text = params.get("text", "")
 
@@ -207,7 +210,7 @@ class TelegramAdapter:
         msg_id = self._run_sync(_send())
         return {"message_id": msg_id}
 
-    def _reply(self, client, params):
+    def _reply(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         chat_id = params.get("chat_id")
         reply_to = params.get("reply_to_id")
         text = params.get("text", "")
@@ -219,7 +222,7 @@ class TelegramAdapter:
         msg_id = self._run_sync(_send())
         return {"message_id": msg_id}
 
-    def _mark_read(self, client, params):
+    def _mark_read(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         chat_id = params.get("chat_id")
 
         async def _mark():
@@ -228,7 +231,7 @@ class TelegramAdapter:
         self._run_sync(_mark())
         return {}
 
-    def _edit_message(self, client, params):
+    def _edit_message(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         chat_id = params.get("chat_id")
         message_id = params.get("message_id")
         text = params.get("text", "")
@@ -240,7 +243,7 @@ class TelegramAdapter:
         msg_id = self._run_sync(_edit())
         return {"message_id": msg_id}
 
-    def _search(self, client, params):
+    def _search(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         chat_id = params.get("chat_id")
         query = params.get("query", "")
         limit = params.get("limit", 10)
@@ -255,7 +258,7 @@ class TelegramAdapter:
         results = self._run_sync(_do_search())
         return {"results": results}
 
-    def _auth_start(self, client, params):
+    def _auth_start(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         phone = params.get("phone", "")
         user_id = params.get("user_id", "default")
 
@@ -270,7 +273,7 @@ class TelegramAdapter:
         self._auth_state[user_id] = {"phone": phone, "hash": sent.phone_code_hash}
         return {"auth_status": "code_required"}
 
-    def _auth_code(self, client, params):
+    def _auth_code(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         code = params.get("code", "")
         password = params.get("password")
         user_id = params.get("user_id", "default")
