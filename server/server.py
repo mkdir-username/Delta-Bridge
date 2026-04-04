@@ -43,7 +43,7 @@ except ImportError:
 try:
     from telegram_adapter import TelegramAdapter
     _tg_adapter = None
-    def _get_telegram_adapter():
+    def _get_telegram_adapter() -> Any:
         global _tg_adapter
         if _tg_adapter is None:
             _tg_adapter = TelegramAdapter()
@@ -51,7 +51,7 @@ try:
         return _tg_adapter
 except ImportError:
     _tg_adapter = None
-    def _get_telegram_adapter():
+    def _get_telegram_adapter() -> Any:
         return None
 
 try:
@@ -543,11 +543,14 @@ def handle_claude_chat(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action", "")
     user_id = request.get("user_id", "default")
     if action == "send":
-        return _claude_chat.send_message(user_id, request.get("text", ""), request.get("model"))
+        result: dict[str, Any] = _claude_chat.send_message(user_id, request.get("text", ""), request.get("model"))
+        return result
     elif action == "check_auth":
-        return _claude_chat.check_auth()
+        result = _claude_chat.check_auth()
+        return result
     elif action == "new_conversation":
-        return _claude_chat.new_conversation(user_id)
+        result = _claude_chat.new_conversation(user_id)
+        return result
     return {"status": 400, "error": "unknown action: {}".format(action)}
 
 
@@ -571,8 +574,9 @@ def dispatch_request(request: dict[str, Any]) -> Optional[dict[str, Any]]:
             if adapter is None:
                 return {"status": 503, "error": "telegram not available (telethon not installed)", "user_id": user_id}
             action = request.get("action", "")
-            result = adapter.handle(action, request)
-            result["user_id"] = user_id
+            adapter_result: dict[str, Any] = adapter.handle(action, request)
+            adapter_result["user_id"] = user_id
+            result = adapter_result
             if action == "auth_code" and result.get("auth_status") == "authorized":
                 _start_telegram_listener(adapter, user_id)
             return result
@@ -593,7 +597,8 @@ def dispatch_request(request: dict[str, Any]) -> Optional[dict[str, Any]]:
             return {"status": 200, "session_id": sid, "user_id": user_id}
         return {"status": 404, "error": f"session {sid} not found", "user_id": user_id}
     if req_type == "browser":
-        return handle_browser_request(request)
+        browser_result: dict[str, Any] = handle_browser_request(request)
+        return browser_result
     return {"status": 400, "error": f"unknown type: {req_type}", "user_id": user_id}
 
 
