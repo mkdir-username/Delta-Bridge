@@ -1,4 +1,6 @@
 """IoE transport layer: IMAP connection, send/receive, link rewriting."""
+from __future__ import annotations
+from typing import Any
 import json
 import uuid
 import time
@@ -18,7 +20,7 @@ from crypto import encrypt, decrypt
 log = logging.getLogger("ioe-web")
 
 
-def imap_conn():
+def imap_conn() -> imaplib.IMAP4_SSL:
     import ioe_web
     last_err = None
     for attempt in range(3):
@@ -34,7 +36,7 @@ def imap_conn():
     raise last_err
 
 
-def send_request(m, request_dict):
+def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
     import ioe_web
     payload = json.dumps(request_dict)
     encrypted = encrypt(ioe_web.IOE_KEY, payload).encode("ascii")
@@ -52,7 +54,7 @@ def send_request(m, request_dict):
     m.append(ioe_web.QUEUE_FOLDER, None, None, msg.as_bytes())
 
 
-def extract_attachment(raw):
+def extract_attachment(raw: bytes) -> bytes | None:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
@@ -60,7 +62,7 @@ def extract_attachment(raw):
     return None
 
 
-def poll_response(user_id, req_id):
+def poll_response(user_id: str, req_id: str) -> None:
     import ioe_web
     t0 = time.time()
     try:
@@ -146,7 +148,7 @@ def poll_response(user_id, req_id):
             ioe_web.pending[(user_id, req_id)] = {"id": req_id, "status": 500, "error": str(e)}
 
 
-def rewrite_links(html):
+def rewrite_links(html: str) -> str:
     html = re.sub(
         r'href="(https?://[^"]+)"',
         lambda m: 'href="/get?url={}"'.format(m.group(1)),
