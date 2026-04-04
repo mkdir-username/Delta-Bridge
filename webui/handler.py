@@ -23,7 +23,7 @@ _ERROR_MAP = [
     (_re.compile(r"UNAVAILABLE", _re.I), "transport", "Сервер почты недоступен, попробуйте позже"),
     (_re.compile(r"timeout", _re.I), "transport", None),
     (_re.compile(r"Connection refused|Network is unreachable|ConnectionReset", _re.I), "transport", "Нет соединения с сервером"),
-    (_re.compile(r"session expired|not registered|auth.*required", _re.I), "auth", None),
+    (_re.compile(r"session expired|not registered|auth.*required", _re.I), "auth", "Сессия истекла, войдите заново"),
     (_re.compile(r"all available options.*already used", _re.I), "rate_limit", "Слишком много попыток. Подождите 10 минут"),
     (_re.compile(r"wait of (\d+) seconds", _re.I), "rate_limit", None),
     (_re.compile(r"phone number is invalid", _re.I), "vps", "Неверный номер телефона"),

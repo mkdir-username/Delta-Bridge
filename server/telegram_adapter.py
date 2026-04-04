@@ -304,7 +304,7 @@ class TelegramAdapter:
         except FloodWaitError as e:
             return {"auth_status": "flood_wait", "seconds": e.seconds}
 
-    def _auth_logout(self, client, params):
+    def _auth_logout(self, client: Any, params: dict[str, Any]) -> dict[str, str]:
         user_id = params.get("user_id", "default")
         try:
             self._run_sync(client.log_out())
