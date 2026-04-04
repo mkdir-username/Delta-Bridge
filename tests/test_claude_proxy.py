@@ -87,11 +87,17 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _patch_requests():
-    old = ioe_server.requests.request
+    old_request = ioe_server.requests.request
+    old_session = ioe_server.requests.Session
     ioe_server.requests.request = lambda *a, **kw: _mock_resp
+    ioe_server.requests.Session = type("Session", (), {
+        "request": lambda *a, **kw: _mock_resp,
+        "close": lambda self: None,
+    })
     ioe_server._claude_session = None
     yield
-    ioe_server.requests.request = old
+    ioe_server.requests.request = old_request
+    ioe_server.requests.Session = old_session
     ioe_server._claude_session = None
 
 
