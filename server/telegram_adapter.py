@@ -61,7 +61,7 @@ class TelegramAdapter:
         if user_id not in self.clients:
             return False
         client = self.clients[user_id]
-        return self._run_sync(client.is_user_authorized())
+        return bool(self._run_sync(client.is_user_authorized()))
 
     def _check_auth(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         user_id = params.get("user_id", "default")
@@ -102,7 +102,7 @@ class TelegramAdapter:
         if not self._run_sync(client.is_user_authorized()):
             return
 
-        def _rate_limited_callback(notification):
+        def _rate_limited_callback(notification: dict[str, Any]) -> None:
             now = time.time()
             uid = notification.get("user_id", "default")
             if now - self._last_notify.get(uid, 0) < self._notify_interval:
@@ -110,7 +110,7 @@ class TelegramAdapter:
             self._last_notify[uid] = now
             notify_callback(notification)
 
-        async def _on_new_message(event):
+        async def _on_new_message(event: Any) -> None:
             sender = await event.get_sender()
             sender_name = getattr(sender, 'first_name', '') or str(getattr(sender, 'id', ''))
             chat = await event.get_chat()
@@ -134,7 +134,7 @@ class TelegramAdapter:
     def _get_dialogs(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         limit = params.get("limit", 20)
 
-        async def _fetch():
+        async def _fetch() -> list[dict[str, Any]]:
             dialogs = await client.get_dialogs(limit=limit)
             result = []
             for d in dialogs:
@@ -164,7 +164,7 @@ class TelegramAdapter:
     def _get_unread(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         limit = params.get("limit", 50)
 
-        async def _fetch():
+        async def _fetch() -> list[dict[str, int | str]]:
             dialogs = await client.get_dialogs(limit=limit)
             return [
                 {"id": d.id, "name": d.name or "", "unread": d.unread_count}
@@ -178,7 +178,7 @@ class TelegramAdapter:
         chat_id = params.get("chat_id")
         limit = params.get("limit", 20)
 
-        async def _fetch():
+        async def _fetch() -> list[dict[str, Any]]:
             messages = await client.get_messages(chat_id, limit=limit)
             result = []
             for m in messages:
@@ -203,9 +203,9 @@ class TelegramAdapter:
         chat_id = params.get("chat_id")
         text = params.get("text", "")
 
-        async def _send():
+        async def _send() -> int:
             msg = await client.send_message(chat_id, text)
-            return msg.id
+            return int(msg.id)
 
         msg_id = self._run_sync(_send())
         return {"message_id": msg_id}
@@ -215,9 +215,9 @@ class TelegramAdapter:
         reply_to = params.get("reply_to_id")
         text = params.get("text", "")
 
-        async def _send():
+        async def _send() -> int:
             msg = await client.send_message(chat_id, text, reply_to=reply_to)
-            return msg.id
+            return int(msg.id)
 
         msg_id = self._run_sync(_send())
         return {"message_id": msg_id}
@@ -225,7 +225,7 @@ class TelegramAdapter:
     def _mark_read(self, client: Any, params: dict[str, Any]) -> dict[str, Any]:
         chat_id = params.get("chat_id")
 
-        async def _mark():
+        async def _mark() -> None:
             await client.send_read_acknowledge(chat_id)
 
         self._run_sync(_mark())
@@ -236,9 +236,9 @@ class TelegramAdapter:
         message_id = params.get("message_id")
         text = params.get("text", "")
 
-        async def _edit():
+        async def _edit() -> int:
             msg = await client.edit_message(chat_id, message_id, text)
-            return msg.id
+            return int(msg.id)
 
         msg_id = self._run_sync(_edit())
         return {"message_id": msg_id}
@@ -248,7 +248,7 @@ class TelegramAdapter:
         query = params.get("query", "")
         limit = params.get("limit", 10)
 
-        async def _do_search():
+        async def _do_search() -> list[dict[str, Any]]:
             messages = await client.get_messages(chat_id, search=query, limit=limit)
             return [
                 {"id": m.id, "text": m.text or "", "date": m.date.isoformat() if m.date else ""}
@@ -262,7 +262,7 @@ class TelegramAdapter:
         phone = params.get("phone", "")
         user_id = params.get("user_id", "default")
 
-        async def _start():
+        async def _start() -> Any:
             result = await client.send_code_request(phone)
             return result
 
@@ -281,7 +281,7 @@ class TelegramAdapter:
         phone = state.get("phone", params.get("phone", ""))
         phone_code_hash = state.get("hash", "")
 
-        async def _complete():
+        async def _complete() -> None:
             if not code and password:
                 await client.sign_in(password=password)
                 return
