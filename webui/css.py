@@ -572,5 +572,5 @@ LOGIN_CSS = """\
 """
 
 
-def login_css():
+def login_css() -> str:
     return LOGIN_CSS

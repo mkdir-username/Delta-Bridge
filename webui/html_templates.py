@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from css import login_css
 
 
-def login_page(error=""):
+def login_page(error: str = "") -> str:
     return """<!DOCTYPE html>
 <html lang="ru">
 <head>
