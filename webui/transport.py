@@ -33,7 +33,7 @@ def imap_conn() -> imaplib.IMAP4_SSL:
             if attempt < 2:
                 log.warning("IMAP login attempt %d failed: %s", attempt + 1, e)
                 time.sleep(2)
-    raise last_err
+    raise last_err  # type: ignore[misc]  # always set after 3 attempts
 
 
 def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
@@ -51,14 +51,15 @@ def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
     part.add_header("Content-Disposition", "attachment",
                     filename=random.choice(ioe_web.FILENAMES))
     msg.attach(part)
-    m.append(ioe_web.QUEUE_FOLDER, None, None, msg.as_bytes())
+    m.append(ioe_web.QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
 
 
 def extract_attachment(raw: bytes) -> bytes | None:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
-            return part.get_payload(decode=True)
+            payload = part.get_payload(decode=True)
+            return payload if isinstance(payload, bytes) else None
     return None
 
 
