@@ -27,10 +27,12 @@ def test_flood_wait():
     assert _humanize_error(raw) == "Подождите 2 мин"
 
 
-def test_unknown_error_sanitized():
+def test_unknown_error_shows_raw():
     from handler import _humanize_error
     raw = "SomeTelethonInternalDetail(param=secret123)"
-    assert _humanize_error(raw) == "Ошибка сервера, попробуйте позже"
+    result = _humanize_error(raw)
+    assert result.startswith("Ошибка сервера: ")
+    assert "SomeTelethonInternalDetail" in result
 
 
 def test_auth_key_unregistered():

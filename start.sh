@@ -15,8 +15,15 @@ if [ -d "$DIR/.git" ]; then
     LOCAL=$(git rev-parse HEAD 2>/dev/null)
     REMOTE=$(git rev-parse origin/main 2>/dev/null)
     if [ "$LOCAL" != "$REMOTE" ]; then
-      echo "Updating $(git log --oneline "$LOCAL".."$REMOTE" | wc -l | tr -d ' ') commits..."
-      git reset --hard origin/main --quiet 2>/dev/null
+      COUNT=$(git log --oneline "$LOCAL".."$REMOTE" | wc -l | tr -d ' ')
+      echo "Updating $COUNT commits..."
+      if git diff --quiet 2>/dev/null && git diff --cached --quiet 2>/dev/null; then
+        git reset --hard origin/main --quiet 2>/dev/null
+      else
+        git stash --quiet 2>/dev/null
+        git reset --hard origin/main --quiet 2>/dev/null
+        git stash pop --quiet 2>/dev/null || true
+      fi
       echo "Updated to $(git log -1 --format='%h %s')"
     else
       echo "Already up to date."
