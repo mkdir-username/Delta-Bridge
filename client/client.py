@@ -1,4 +1,6 @@
 """IoE CLI client v2: folder-based, steganographic, AES-256-GCM."""
+from __future__ import annotations
+from typing import Any
 import os
 import sys
 import json
@@ -14,9 +16,9 @@ from email import encoders
 
 from crypto import derive_key, encrypt, decrypt
 
-EMAIL = os.environ["EMAIL"]
-PASSWORD = os.environ["IMAP_PASSWORD"]
-IOE_KEY = derive_key(os.environ["IOE_SECRET"])
+EMAIL: str = os.environ["EMAIL"]
+PASSWORD: str = os.environ["IMAP_PASSWORD"]
+IOE_KEY: bytes = derive_key(os.environ["IOE_SECRET"])
 
 IMAP_HOST = "imap.yandex.ru"
 QUEUE_FOLDER = "IoE"
@@ -30,13 +32,13 @@ FILENAMES = ["report.pdf", "scan.pdf", "doc.pdf", "invoice.pdf", "notes.pdf"]
 BODIES = ["", "см. вложение", "Документ", "Во вложении"]
 
 
-def imap_conn():
+def imap_conn() -> imaplib.IMAP4_SSL:
     m = imaplib.IMAP4_SSL(IMAP_HOST, 993)
     m.login(EMAIL, PASSWORD)
     return m
 
 
-def send_request(m, request_dict):
+def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> str:
     payload = json.dumps(request_dict)
     encrypted = encrypt(IOE_KEY, payload).encode("ascii")
     msg = MIMEMultipart()
@@ -54,7 +56,7 @@ def send_request(m, request_dict):
     return request_dict["id"]
 
 
-def extract_attachment(raw):
+def extract_attachment(raw: bytes) -> bytes | None:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
@@ -62,7 +64,7 @@ def extract_attachment(raw):
     return None
 
 
-def wait_response(m, req_id, timeout=90):
+def wait_response(m: imaplib.IMAP4_SSL, req_id: str, timeout: int = 90) -> dict[str, Any] | None:
     m.select("INBOX")
     for _ in range(timeout // 3):
         time.sleep(3)
@@ -89,7 +91,7 @@ def wait_response(m, req_id, timeout=90):
     return None
 
 
-def main():
+def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: client.py <cmd> <url_or_query>")
         print("  client.py get <url>       - reader mode")
