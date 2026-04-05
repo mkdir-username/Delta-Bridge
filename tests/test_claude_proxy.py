@@ -516,8 +516,319 @@ class TestClaudeProxyHandler:
         handler.log_message("%s", "test")
 
 
+class TestClaudeProxyHandlerMethods:
+    def _make_handler(self, method="GET", path="/v1/models", body=b""):
+        handler = claude_proxy.ClaudeProxyHandler.__new__(claude_proxy.ClaudeProxyHandler)
+        handler.command = method
+        handler.path = path
+        handler.headers = {"Content-Length": str(len(body)), "host": "localhost"}
+        handler.rfile = BytesIO(body)
+        handler.wfile = BytesIO()
+        handler.requestline = f"{method} {path} HTTP/1.1"
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.request_version = "HTTP/1.1"
+        handler._headers_buffer = []
+        return handler
+
+    def test_do_POST_делегирует(self):
+        handler = self._make_handler("POST", "/v1/messages", b"{}")
+        with patch.object(handler, "_handle_request") as mock_handle:
+            handler.do_POST()
+        mock_handle.assert_called_once_with("POST")
+
+    def test_do_OPTIONS_делегирует(self):
+        handler = self._make_handler("OPTIONS", "/v1/messages")
+        with patch.object(handler, "_handle_request") as mock_handle:
+            handler.do_OPTIONS()
+        mock_handle.assert_called_once_with("OPTIONS")
+
+    def test_do_PUT_делегирует(self):
+        handler = self._make_handler("PUT", "/v1/messages")
+        with patch.object(handler, "_handle_request") as mock_handle:
+            handler.do_PUT()
+        mock_handle.assert_called_once_with("PUT")
+
+    def test_do_DELETE_делегирует(self):
+        handler = self._make_handler("DELETE", "/v1/messages")
+        with patch.object(handler, "_handle_request") as mock_handle:
+            handler.do_DELETE()
+        mock_handle.assert_called_once_with("DELETE")
+
+    def test_do_PATCH_делегирует(self):
+        handler = self._make_handler("PATCH", "/v1/messages")
+        with patch.object(handler, "_handle_request") as mock_handle:
+            handler.do_PATCH()
+        mock_handle.assert_called_once_with("PATCH")
+
+
 class TestThreadedServer:
     def test_создание_сервера(self):
         server = claude_proxy.ThreadedHTTPServer(("127.0.0.1", 0), claude_proxy.ClaudeProxyHandler)
         assert server.socket is not None
         server.server_close()
+
+    def test_process_request_запускает_поток(self):
+        server = claude_proxy.ThreadedHTTPServer(("127.0.0.1", 0), claude_proxy.ClaudeProxyHandler)
+        try:
+            mock_request = MagicMock()
+            called = {"done": False}
+
+            def fake_thread_fn(req, addr):
+                called["done"] = True
+
+            with patch.object(server, "process_request_thread", side_effect=fake_thread_fn):
+                server.process_request(mock_request, ("127.0.0.1", 99))
+            import time as _time
+
+            _time.sleep(0.05)
+            assert called["done"] is True
+        finally:
+            server.server_close()
+
+    def test_process_request_thread_обрабатывает_ошибку(self):
+        server = claude_proxy.ThreadedHTTPServer(("127.0.0.1", 0), claude_proxy.ClaudeProxyHandler)
+        try:
+            mock_request = MagicMock()
+            with (
+                patch.object(server, "finish_request", side_effect=Exception("bad")),
+                patch.object(server, "handle_error") as mock_err,
+                patch.object(server, "shutdown_request") as mock_shut,
+            ):
+                server.process_request_thread(mock_request, ("127.0.0.1", 99))
+            mock_err.assert_called_once()
+            mock_shut.assert_called_once()
+        finally:
+            server.server_close()
+
+
+class TestPollResponseBranches:
+    def _make_encrypted_msg(self, response_dict: dict) -> bytes:
+        from ioe_crypto import compress_encrypt, derive_key
+
+        key = derive_key("test-secret-key")
+        encrypted_str = compress_encrypt(key, json.dumps(response_dict))
+        encrypted_bytes = encrypted_str.encode("ascii")
+        msg = MIMEMultipart()
+        msg["Subject"] = "reply"
+        part = MIMEBase("application", "pdf")
+        part.set_payload(encrypted_bytes)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="r.pdf")
+        msg.attach(part)
+        return msg.as_bytes()
+
+    def test_noop_ошибка_переподключает(self):
+        key = derive_key("test-secret-key")
+        req_id = "req-reconnect"
+        response_dict = {
+            "id": req_id,
+            "type": "claude_proxy_response",
+            "http_response": {"status_code": 200, "headers": {}, "body": "ok"},
+        }
+        raw = self._make_encrypted_msg(response_dict)
+
+        first_imap = MagicMock()
+        first_imap.select.return_value = ("OK", [])
+        first_imap.noop.side_effect = Exception("noop failed")
+
+        second_imap = MagicMock()
+        second_imap.select.return_value = ("OK", [])
+        second_imap.noop.return_value = ("OK", [])
+        second_imap.search.return_value = ("OK", [b"1"])
+        second_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
+        second_imap.store.return_value = ("OK", [])
+        second_imap.expunge.return_value = ("OK", [])
+
+        connect_calls = {"n": 0}
+
+        def make_imap():
+            connect_calls["n"] += 1
+            if connect_calls["n"] == 1:
+                return first_imap
+            return second_imap
+
+        with (
+            patch.object(claude_proxy, "_imap_connect", side_effect=make_imap),
+            patch.object(claude_proxy, "IOE_KEY", key),
+            patch("time.sleep"),
+        ):
+            result = claude_proxy._poll_response(req_id)
+
+        assert result is not None
+        assert result["id"] == req_id
+        assert connect_calls["n"] == 2
+
+    def test_unseen_пусто_после_5_циклов_ищет_all(self):
+        key = derive_key("test-secret-key")
+        req_id = "req-fallback"
+        response_dict = {
+            "id": req_id,
+            "type": "claude_proxy_response",
+            "http_response": {"status_code": 200, "headers": {}, "body": "ok"},
+        }
+        raw = self._make_encrypted_msg(response_dict)
+
+        search_calls = {"n": 0}
+
+        def fake_search(charset, *criteria):
+            search_calls["n"] += 1
+            if "UNSEEN" in criteria:
+                return ("OK", [b""])
+            return ("OK", [b"1"])
+
+        mock_imap = MagicMock()
+        mock_imap.select.return_value = ("OK", [])
+        mock_imap.noop.return_value = ("OK", [])
+        mock_imap.search.side_effect = fake_search
+        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
+        mock_imap.store.return_value = ("OK", [])
+        mock_imap.expunge.return_value = ("OK", [])
+
+        with (
+            patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
+            patch.object(claude_proxy, "IOE_KEY", key),
+            patch("time.sleep"),
+        ):
+            result = claude_proxy._poll_response(req_id)
+
+        assert result is not None
+        assert result["id"] == req_id
+        all_calls = [c for c in mock_imap.search.call_args_list if "ALL" in c[0]]
+        assert len(all_calls) >= 1
+
+    def test_fetch_data_none_пропускает(self):
+        mock_imap = MagicMock()
+        mock_imap.select.return_value = ("OK", [])
+        mock_imap.noop.return_value = ("OK", [])
+        mock_imap.search.return_value = ("OK", [b"1"])
+        mock_imap.fetch.return_value = ("OK", [None])
+
+        with (
+            patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
+            patch.object(claude_proxy, "POLL_CYCLES", 2),
+            patch("time.sleep"),
+        ):
+            result = claude_proxy._poll_response("req-none-data")
+
+        assert result is None
+
+    def test_decrypt_ошибка_продолжает_цикл(self):
+        fake_raw = b"From: x\r\n\r\nbody-without-attachment"
+        msg = MIMEMultipart()
+        part = MIMEBase("application", "pdf")
+        part.set_payload(b"not-valid-encrypted")
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="r.pdf")
+        msg.attach(part)
+        raw = msg.as_bytes()
+
+        mock_imap = MagicMock()
+        mock_imap.select.return_value = ("OK", [])
+        mock_imap.noop.return_value = ("OK", [])
+        mock_imap.search.return_value = ("OK", [b"1"])
+        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
+
+        with (
+            patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
+            patch.object(claude_proxy, "POLL_CYCLES", 2),
+            patch("time.sleep"),
+        ):
+            result = claude_proxy._poll_response("req-bad-decrypt")
+
+        assert result is None
+
+    def test_logout_ошибка_при_очистке_не_падает(self):
+        key = derive_key("test-secret-key")
+        req_id = "req-store-fail"
+        response_dict = {
+            "id": req_id,
+            "type": "claude_proxy_response",
+            "http_response": {"status_code": 200, "headers": {}, "body": "ok"},
+        }
+        raw = self._make_encrypted_msg(response_dict)
+
+        mock_imap = MagicMock()
+        mock_imap.select.return_value = ("OK", [])
+        mock_imap.noop.return_value = ("OK", [])
+        mock_imap.search.return_value = ("OK", [b"1"])
+        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
+        mock_imap.store.side_effect = Exception("store failed")
+        mock_imap.expunge.return_value = ("OK", [])
+
+        with (
+            patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
+            patch.object(claude_proxy, "IOE_KEY", key),
+            patch("time.sleep"),
+        ):
+            result = claude_proxy._poll_response(req_id)
+
+        assert result is not None
+        assert result["id"] == req_id
+
+
+class TestGetSendConnLogoutException:
+    def setup_method(self, method):
+        claude_proxy._send_conn = None
+
+    def teardown_method(self, method):
+        claude_proxy._send_conn = None
+
+    def test_logout_ошибка_при_пересоздании_не_падает(self):
+        old_conn = MagicMock()
+        old_conn.noop.side_effect = Exception("broken")
+        old_conn.logout.side_effect = Exception("logout also broken")
+        claude_proxy._send_conn = old_conn
+        new_conn = MagicMock()
+        with patch.object(claude_proxy, "_imap_connect", return_value=new_conn):
+            result = claude_proxy._get_send_conn()
+        assert result is new_conn
+
+
+class TestMain:
+    def test_main_запускает_сервер(self):
+        mock_server = MagicMock()
+
+        def fake_server_class(addr, handler):
+            return mock_server
+
+        with (
+            patch.object(claude_proxy, "ThreadedHTTPServer", side_effect=fake_server_class),
+            patch.object(claude_proxy, "_get_send_conn"),
+            patch.object(claude_proxy, "EMAIL", "test@test.com"),
+            patch.object(claude_proxy, "IMAP_PASSWORD", "pass"),
+            patch.object(claude_proxy, "IOE_SECRET", "secret"),
+            patch.object(claude_proxy, "PROXY_PORT", 0),
+        ):
+            claude_proxy.main()
+
+        mock_server.serve_forever.assert_called_once()
+
+    def test_main_выходит_без_env(self):
+        import pytest
+
+        with (
+            patch.object(claude_proxy, "EMAIL", ""),
+            patch.object(claude_proxy, "IMAP_PASSWORD", ""),
+            patch.object(claude_proxy, "IOE_SECRET", ""),
+            pytest.raises(SystemExit),
+        ):
+            claude_proxy.main()
+
+    def test_main_keyboard_interrupt_корректно_завершает(self):
+        mock_server = MagicMock()
+        mock_server.serve_forever.side_effect = KeyboardInterrupt
+
+        def fake_server_class(addr, handler):
+            return mock_server
+
+        with (
+            patch.object(claude_proxy, "ThreadedHTTPServer", side_effect=fake_server_class),
+            patch.object(claude_proxy, "_get_send_conn"),
+            patch.object(claude_proxy, "EMAIL", "test@test.com"),
+            patch.object(claude_proxy, "IMAP_PASSWORD", "pass"),
+            patch.object(claude_proxy, "IOE_SECRET", "secret"),
+            patch.object(claude_proxy, "PROXY_PORT", 0),
+        ):
+            claude_proxy.main()
+
+        mock_server.shutdown.assert_called_once()
