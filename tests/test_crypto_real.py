@@ -4,16 +4,9 @@ import importlib
 
 pytest = __import__("pytest")
 _root = os.path.dirname(os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(_root, "server"))
-
 Crypto = pytest.importorskip("Crypto")
 
-if "crypto" in sys.modules:
-    _crypto_file = getattr(sys.modules["crypto"], "__file__", "") or ""
-    if "server" not in _crypto_file:
-        del sys.modules["crypto"]
-
-from crypto import derive_key, encrypt, decrypt
+from ioe_crypto import derive_key, encrypt, decrypt
 
 
 class TestCryptoReal:

@@ -15,7 +15,10 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-from crypto import encrypt, decrypt
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
+from ioe_crypto import encrypt, decrypt
 
 log = logging.getLogger("ioe-web")
 
@@ -40,6 +43,8 @@ def imap_conn() -> imaplib.IMAP4_SSL:
 
 def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
     import ioe_web
+    rid = request_dict.get("id", "?")
+    log.info("[%s] send_request: APPEND to %s", rid, ioe_web.QUEUE_FOLDER)
     payload = json.dumps(request_dict)
     encrypted = encrypt(ioe_web.IOE_KEY, payload).encode("ascii")
     msg = MIMEMultipart()
@@ -54,6 +59,7 @@ def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
                     filename=random.choice(ioe_web.FILENAMES))
     msg.attach(part)
     m.append(ioe_web.QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
+    log.info("[%s] send_request: APPEND OK", rid)
 
 
 def extract_attachment(raw: bytes) -> bytes | None:

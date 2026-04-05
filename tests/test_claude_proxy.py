@@ -47,7 +47,7 @@ os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "test")
 os.environ.setdefault("IOE_SECRET", "test-secret-key")
 
-from crypto import derive_key, encrypt, decrypt, compress_encrypt, decrypt_decompress
+from ioe_crypto import derive_key, encrypt, decrypt, compress_encrypt, decrypt_decompress
 import server as ioe_server
 
 ioe_server.requests = sys.modules["requests"]

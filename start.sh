@@ -64,23 +64,14 @@ WEB="$DIR/webui/ioe_web.py"
 [ -f "$WEB" ] || WEB="$HOME/ioe_web.py"
 [ -f "$WEB" ] || { echo "ioe_web.py not found"; exit 1; }
 
-# Copy crypto.py next to ioe_web.py if missing
 WEBDIR="$(dirname "$WEB")"
-if [ ! -f "$WEBDIR/crypto.py" ]; then
-  for f in "$DIR/server/crypto.py" "$DIR/client/crypto.py"; do
-    [ -f "$f" ] && cp "$f" "$WEBDIR/crypto.py" && break
-  done
-fi
+export PYTHONPATH="$DIR:${PYTHONPATH:-}"
 
 # Claude proxy mode
 if [ "$1" = "--claude" ] || [ "$1" = "claude" ]; then
   CLAUDE_PORT="${2:-8090}"
   PROXY="$DIR/client/claude_proxy.py"
   [ -f "$PROXY" ] || { echo "claude_proxy.py not found"; exit 1; }
-
-  if [ ! -f "$DIR/client/crypto.py" ]; then
-    cp "$DIR/server/crypto.py" "$DIR/client/crypto.py"
-  fi
 
   pkill -f "claude_proxy.py" 2>/dev/null || true
   sleep 1
