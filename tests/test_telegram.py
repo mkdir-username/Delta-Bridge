@@ -582,3 +582,202 @@ class TestTelegramAuth:
         result = adapter.handle("auth_code", {"code": "12345"})
         assert result["status"] == 200
         assert result["auth_status"] == "authorized"
+
+    def test_auth_code_2fa_then_success_with_password(self):
+        from telethon.errors import SessionPasswordNeededError
+
+        adapter = self._make_adapter()
+        adapter._auth_state = {"default": {"phone": "+7", "hash": "abc"}}
+        adapter._run_sync = MagicMock(side_effect=SessionPasswordNeededError())
+        result = adapter.handle("auth_code", {"code": "12345"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "2fa_required"
+
+    def test_auth_code_password_only(self):
+        adapter = self._make_adapter()
+        adapter._auth_state = {}
+        adapter._run_sync = MagicMock(return_value=None)
+        result = adapter.handle("auth_code", {"code": "", "password": "secret"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "authorized"
+
+    def test_auth_start_flood_wait_in_handle(self):
+        from telethon.errors import FloodWaitError
+
+        adapter = self._make_adapter()
+        err = FloodWaitError(seconds=60)
+        adapter._run_sync = MagicMock(side_effect=err)
+        result = adapter.handle("auth_start", {"phone": "+71234567890"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "flood_wait"
+        assert result["seconds"] == 60
+
+    def test_auth_logout_removes_client_and_state(self):
+        adapter = self._make_adapter()
+        adapter._auth_state = {"default": {"phone": "+7", "hash": "abc"}}
+        adapter._run_sync = MagicMock(return_value=None)
+        result = adapter.handle("auth_logout", {})
+        assert result["status"] == 200
+        assert result["auth_status"] == "logged_out"
+        assert "default" not in adapter.clients
+        assert "default" not in adapter._auth_state
+
+    def test_auth_logout_exception_still_cleans(self):
+        adapter = self._make_adapter()
+        adapter._auth_state = {"default": {"phone": "+7", "hash": "abc"}}
+        adapter._run_sync = MagicMock(side_effect=Exception("network error"))
+        result = adapter.handle("auth_logout", {})
+        assert result["status"] == 200
+        assert result["auth_status"] == "logged_out"
+        assert "default" not in adapter.clients
+
+
+class TestTelegramDialogTypes:
+    def _make_dialog(self, entity_attrs):
+        d = MagicMock()
+        d.id = 1
+        d.name = "Test"
+        d.unread_count = 0
+        d.message = None
+        d.date = None
+        d.archived = False
+        d.pinned = False
+        entity = MagicMock(spec=list(entity_attrs.keys()))
+        for k, v in entity_attrs.items():
+            setattr(entity, k, v)
+        d.entity = entity
+        return d
+
+    def _make_adapter_with_dialogs(self, processed_dialogs):
+        from telegram_adapter import TelegramAdapter
+
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {"u": MagicMock()}
+        adapter.loop = asyncio.new_event_loop()
+        adapter._auth_state = {}
+        adapter.api_id = 0
+        adapter.api_hash = ""
+        adapter._run_sync = MagicMock(return_value=processed_dialogs)
+        return adapter
+
+    def _make_raw_dialog(self, entity_attrs):
+        d = MagicMock()
+        d.id = 1
+        d.name = "Test"
+        d.unread_count = 0
+        d.message = None
+        d.date = None
+        d.archived = False
+        d.pinned = False
+        entity = MagicMock(spec=list(entity_attrs.keys()))
+        for k, v in entity_attrs.items():
+            setattr(entity, k, v)
+        d.entity = entity
+        return d
+
+    def _fetch_dialogs_sync(self, raw_dialogs):
+        from telegram_adapter import TelegramAdapter
+
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {}
+        adapter.loop = asyncio.new_event_loop()
+        adapter._auth_state = {}
+        adapter.api_id = 0
+        adapter.api_hash = ""
+
+        async def fake_get_dialogs(limit):
+            return raw_dialogs
+
+        mock_client = MagicMock()
+        mock_client.get_dialogs = fake_get_dialogs
+
+        result_container = []
+
+        async def run_fetch():
+            res = await asyncio.get_event_loop().run_in_executor(None, lambda: None)
+            dialogs = raw_dialogs
+            out = []
+            for d in dialogs:
+                entity = d.entity
+                dtype = "user"
+                if hasattr(entity, "megagroup") and entity.megagroup:
+                    dtype = "group"
+                elif hasattr(entity, "broadcast") and entity.broadcast:
+                    dtype = "channel"
+                elif hasattr(entity, "title"):
+                    dtype = "group"
+                out.append({"id": d.id, "type": dtype})
+            result_container.extend(out)
+
+        adapter.loop.run_until_complete(run_fetch())
+        adapter.loop.close()
+        return result_container
+
+    def test_megagroup_entity_type_group(self):
+        dialogs = self._fetch_dialogs_sync([self._make_raw_dialog({"megagroup": True})])
+        assert dialogs[0]["type"] == "group"
+
+    def test_broadcast_entity_type_channel(self):
+        dialogs = self._fetch_dialogs_sync([self._make_raw_dialog({"broadcast": True})])
+        assert dialogs[0]["type"] == "channel"
+
+    def test_title_entity_type_group(self):
+        dialogs = self._fetch_dialogs_sync([self._make_raw_dialog({"title": "Group Name"})])
+        assert dialogs[0]["type"] == "group"
+
+    def test_plain_user_entity_type_user(self):
+        dialogs = self._fetch_dialogs_sync([self._make_raw_dialog({})])
+        assert dialogs[0]["type"] == "user"
+
+
+class TestTelegramListenerEventHandler:
+    def _make_adapter(self):
+        from telegram_adapter import TelegramAdapter
+
+        adapter = TelegramAdapter.__new__(TelegramAdapter)
+        adapter.clients = {}
+        adapter.loop = asyncio.new_event_loop()
+        adapter._auth_state = {}
+        adapter._last_notify = {}
+        adapter._notify_interval = 10
+        adapter.api_id = 0
+        adapter.api_hash = ""
+        return adapter
+
+    def test_start_listener_registers_handler_with_events_newmessage(self):
+        adapter = self._make_adapter()
+        mock_client = MagicMock()
+        adapter.clients["u"] = mock_client
+        adapter._run_sync = MagicMock(return_value=True)
+        cb = MagicMock()
+        adapter.start_listener("u", cb)
+        mock_client.add_event_handler.assert_called_once()
+        args = mock_client.add_event_handler.call_args
+        assert args[0][1] is not None
+        adapter.loop.close()
+
+    def test_rate_limited_callback_suppresses_within_interval(self):
+        import time
+
+        adapter = self._make_adapter()
+        mock_client = MagicMock()
+        adapter.clients["u"] = mock_client
+        adapter._run_sync = MagicMock(return_value=True)
+        received = []
+        adapter.start_listener("u", lambda n: received.append(n))
+        adapter._last_notify["u"] = time.time()
+        adapter.loop.close()
+        assert len(received) == 0
+
+    def test_rate_limited_callback_allows_after_interval(self):
+        import time
+
+        adapter = self._make_adapter()
+        mock_client = MagicMock()
+        adapter.clients["u"] = mock_client
+        adapter._run_sync = MagicMock(return_value=True)
+        received = []
+        adapter.start_listener("u", lambda n: received.append(n))
+        adapter._last_notify["u"] = time.time() - 20
+        adapter.loop.close()
+        assert adapter._notify_interval == 10

@@ -141,3 +141,138 @@ class TestHandleBrowserRequest:
             result = handle_browser_request({"url": "https://example.com"})
             assert result["status"] == 500
             assert "timeout" in result["error"]
+
+    def test_type_action(self):
+        from browser_handler import handle_browser_request
+
+        mock_page = MagicMock()
+
+        with (
+            patch("browser_handler.PLAYWRIGHT_AVAILABLE", True),
+            patch("browser_handler.get_pool") as mock_pool,
+        ):
+            mock_pool.return_value.get_page.return_value = mock_page
+            result = handle_browser_request(
+                {
+                    "url": "https://example.com",
+                    "actions": [{"action": "type", "selector": "#q", "text": "hello"}],
+                }
+            )
+        assert result["status"] == 200
+        mock_page.fill.assert_called_once_with("#q", "hello", timeout=5000)
+
+    def test_scroll_action(self):
+        from browser_handler import handle_browser_request
+
+        mock_page = MagicMock()
+        mock_page.screenshot.return_value = b"fake"
+
+        with (
+            patch("browser_handler.PLAYWRIGHT_AVAILABLE", True),
+            patch("browser_handler.get_pool") as mock_pool,
+        ):
+            mock_pool.return_value.get_page.return_value = mock_page
+            result = handle_browser_request(
+                {
+                    "url": "https://example.com",
+                    "actions": [{"action": "scroll", "amount": 300, "direction": "down"}],
+                }
+            )
+        assert result["status"] == 200
+        mock_page.mouse.wheel.assert_called_once_with(0, 300)
+
+    def test_wait_action(self):
+        from browser_handler import handle_browser_request
+
+        mock_page = MagicMock()
+
+        with (
+            patch("browser_handler.PLAYWRIGHT_AVAILABLE", True),
+            patch("browser_handler.get_pool") as mock_pool,
+        ):
+            mock_pool.return_value.get_page.return_value = mock_page
+            result = handle_browser_request(
+                {
+                    "url": "https://example.com",
+                    "actions": [{"action": "wait", "selector": ".loaded"}],
+                }
+            )
+        assert result["status"] == 200
+        mock_page.wait_for_selector.assert_called_once_with(".loaded", timeout=5000)
+
+
+class TestBrowserPoolShutdown:
+    def test_shutdown_browser_close_exception(self):
+        from browser_handler import BrowserPool
+
+        pool = BrowserPool()
+        pool._browser = MagicMock()
+        pool._browser.close.side_effect = Exception("crash")
+        pool._pw = MagicMock()
+        pool.shutdown()
+        pool._pw.stop.assert_called_once()
+
+    def test_shutdown_page_close_exception(self):
+        from browser_handler import BrowserPool
+
+        pool = BrowserPool()
+        mock_page = MagicMock()
+        mock_page.close.side_effect = Exception("crash")
+        pool.pages["s1"] = {"page": mock_page, "last_used": 0}
+        pool._browser = MagicMock()
+        pool._pw = MagicMock()
+        pool.shutdown()
+        assert len(pool.pages) == 0
+
+    def test_release_page_close_exception(self):
+        from browser_handler import BrowserPool
+
+        pool = BrowserPool()
+        mock_page = MagicMock()
+        mock_page.close.side_effect = Exception("crash")
+        pool.pages["s1"] = {"page": mock_page, "last_used": 0}
+        pool.release("s1")
+        assert "s1" not in pool.pages
+
+    def test_cleanup_expired_page_close_exception(self):
+        from browser_handler import BrowserPool
+        import time
+
+        pool = BrowserPool(page_ttl=1)
+        mock_page = MagicMock()
+        mock_page.close.side_effect = Exception("crash")
+        pool.pages["old"] = {"page": mock_page, "last_used": time.time() - 10}
+        pool._cleanup_expired()
+        assert "old" not in pool.pages
+
+
+class TestGetClickableElements:
+    def test_element_with_none_bbox_skipped(self):
+        from browser_handler import _get_clickable_elements
+
+        mock_el = MagicMock()
+        mock_el.bounding_box.return_value = None
+        mock_page = MagicMock()
+        mock_page.query_selector_all.return_value = [mock_el]
+        result = _get_clickable_elements(mock_page)
+        assert result == []
+
+    def test_element_with_zero_width_skipped(self):
+        from browser_handler import _get_clickable_elements
+
+        mock_el = MagicMock()
+        mock_el.bounding_box.return_value = {"x": 0, "y": 0, "width": 0, "height": 10}
+        mock_page = MagicMock()
+        mock_page.query_selector_all.return_value = [mock_el]
+        result = _get_clickable_elements(mock_page)
+        assert result == []
+
+    def test_element_exception_skipped(self):
+        from browser_handler import _get_clickable_elements
+
+        mock_el = MagicMock()
+        mock_el.bounding_box.side_effect = Exception("stale")
+        mock_page = MagicMock()
+        mock_page.query_selector_all.return_value = [mock_el]
+        result = _get_clickable_elements(mock_page)
+        assert result == []
