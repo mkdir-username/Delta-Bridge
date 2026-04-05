@@ -11,21 +11,25 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 import unittest
 
+import importlib.util
+
 _root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, _root)
-sys.path.insert(0, os.path.join(_root, "client"))
 
 for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests", "trafilatura"]:
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
 sys.modules["truststore"].inject_into_ssl = lambda: None
-sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
+if not hasattr(sys.modules.get("imapclient", None), "IMAPClient"):
+    sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 
 os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "test")
 os.environ.setdefault("IOE_SECRET", "test-secret-key")
 
-import ioe_web  # noqa: E402
+_spec = importlib.util.spec_from_file_location("client_ioe_web", os.path.join(_root, "client", "ioe_web.py"))
+ioe_web = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ioe_web)  # type: ignore[union-attr]
 
 
 def _make_email_with_attachment(payload: bytes) -> bytes:
@@ -90,13 +94,10 @@ class TestRewriteLinks(unittest.TestCase):
 
 
 class TestIMapConn(unittest.TestCase):
-    @patch("ioe_web.imaplib.IMAP4_SSL")
-    def test_создаёт_ssl_подключение_и_логинится(self, mock_ssl):
+    def test_создаёт_ssl_подключение_и_логинится(self):
         mock_instance = MagicMock()
-        mock_ssl.return_value = mock_instance
-
-        result = ioe_web.imap_conn()
-
+        with patch("imaplib.IMAP4_SSL", return_value=mock_instance) as mock_ssl:
+            result = ioe_web.imap_conn()
         mock_ssl.assert_called_once_with("imap.yandex.ru", 993)
         mock_instance.login.assert_called_once_with(ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
         assert result is mock_instance
