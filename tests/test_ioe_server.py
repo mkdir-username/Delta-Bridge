@@ -601,3 +601,605 @@ class TestLockFile:
             result = ioe_server._acquire_lock()
             mock_fd.write.assert_called_once_with(str(os.getpid()))
             mock_fd.flush.assert_called_once()
+
+
+class TestDispatchBranches:
+    def test_dispatch_none_type_возвращает_none(self):
+        import ioe_server
+
+        result = ioe_server.dispatch_request({"user_id": "u1"})
+        assert result is None
+
+    def test_dispatch_browser_вызывает_handle_browser_request(self):
+        import ioe_server
+        from unittest.mock import patch
+
+        fake_result = {"status": 200, "body": "ok"}
+        with patch.object(ioe_server, "handle_browser_request", return_value=fake_result) as mock_br:
+            result = ioe_server.dispatch_request({"type": "browser", "url": "https://example.com", "user_id": "u1"})
+            mock_br.assert_called_once()
+            assert result == fake_result
+
+    def test_dispatch_telegram_без_адаптера_возвращает_503(self):
+        import ioe_server
+        from unittest.mock import patch
+
+        with patch.object(ioe_server, "_get_telegram_adapter", return_value=None):
+            result = ioe_server.dispatch_request({"type": "command", "service": "telegram", "user_id": "u1"})
+            assert result is not None
+            assert result.get("status") == 503
+
+    def test_dispatch_claude_chat_без_модуля_возвращает_503(self):
+        import ioe_server
+
+        original = ioe_server._claude_chat
+        ioe_server._claude_chat = None
+        try:
+            result = ioe_server.dispatch_request({"type": "claude_chat", "action": "send", "user_id": "u1"})
+            assert result is not None
+            assert result.get("status") == 503
+        finally:
+            ioe_server._claude_chat = original
+
+    def test_dispatch_claude_chat_unknown_action_возвращает_400(self):
+        import ioe_server
+        from unittest.mock import MagicMock
+
+        mock_chat = MagicMock()
+        original = ioe_server._claude_chat
+        ioe_server._claude_chat = mock_chat
+        try:
+            result = ioe_server.dispatch_request({"type": "claude_chat", "action": "unknown_action", "user_id": "u1"})
+            assert result is not None
+            assert result.get("status") == 400
+        finally:
+            ioe_server._claude_chat = original
+
+    def test_dispatch_telegram_с_адаптером_auth_code_запускает_listener(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        mock_adapter = MagicMock()
+        mock_adapter.handle.return_value = {"auth_status": "authorized", "status": 200}
+
+        with (
+            patch.object(ioe_server, "_get_telegram_adapter", return_value=mock_adapter),
+            patch.object(ioe_server, "_start_telegram_listener") as mock_listener,
+        ):
+            result = ioe_server.dispatch_request(
+                {"type": "command", "service": "telegram", "action": "auth_code", "user_id": "u2"}
+            )
+            mock_listener.assert_called_once_with(mock_adapter, "u2")
+
+    def test_start_telegram_listener_пропускает_повторный_вызов(self):
+        import ioe_server
+        from unittest.mock import MagicMock
+
+        mock_adapter = MagicMock()
+        ioe_server._tg_listeners_started.discard("uid-test-99")
+        ioe_server._start_telegram_listener(mock_adapter, "uid-test-99")
+        ioe_server._start_telegram_listener(mock_adapter, "uid-test-99")
+        assert mock_adapter.start_listener.call_count == 1
+        ioe_server._tg_listeners_started.discard("uid-test-99")
+
+
+class TestTrafilaturaTier2:
+    def test_tier2_favor_recall_возвращает_markdown(self):
+        import types
+        import ioe_server
+
+        call_count = [0]
+
+        def tier2_extract(html, **kw):
+            call_count[0] += 1
+            if kw.get("favor_recall"):
+                return "First line of content\n\nSome article text that is longer than min." + " More. " * 20
+            if not html or len(html) < 500:
+                return None
+            return None
+
+        original_extract = ioe_server.trafilatura.extract
+        ioe_server.trafilatura.extract = tier2_extract
+
+        html = "<html><body><p>" + "Short content. " * 5 + "</p></body></html>"
+        mock_resp = types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
+        original_get = ioe_server.requests.get
+        ioe_server.requests.get = lambda *a, **kw: mock_resp
+        ioe_server._page_cache.clear()
+
+        try:
+            result = ioe_server.smart_extract("https://example.com/tier2-test")
+            if result["format"] == "markdown":
+                assert result["title"] == "First line of content"
+        finally:
+            ioe_server.trafilatura.extract = original_extract
+            ioe_server.requests.get = original_get
+            ioe_server._page_cache.clear()
+
+
+class TestProcessMessage:
+    def test_уже_обработанный_uid_пропускается(self):
+        import ioe_server
+
+        ioe_server._processed_uids.add(9999)
+        mock_client = type("C", (), {"append": lambda *a, **kw: None})()
+        result = ioe_server.process_message(mock_client, 9999, b"irrelevant")
+        assert result is True
+        ioe_server._processed_uids.discard(9999)
+
+    def test_нет_вложения_возвращает_false(self):
+        import ioe_server
+        from email.mime.text import MIMEText
+
+        msg = MIMEText("plain text no attachment")
+        mock_client = type("C", (), {"append": lambda *a, **kw: None})()
+        ioe_server._processed_uids.discard(8888)
+        result = ioe_server.process_message(mock_client, 8888, msg.as_bytes())
+        assert result is False
+
+    def test_поврежденное_вложение_возвращает_false(self):
+        import ioe_server
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+
+        msg = MIMEMultipart()
+        part = MIMEBase("application", "pdf")
+        part.set_payload(b"not-encrypted-garbage")
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="x.pdf")
+        msg.attach(part)
+
+        mock_client = type("C", (), {"append": lambda *a, **kw: None})()
+        ioe_server._processed_uids.discard(7777)
+        result = ioe_server.process_message(mock_client, 7777, msg.as_bytes())
+        assert result is False
+
+    def test_валидный_search_запрос_обрабатывается(self):
+        import ioe_server
+        import json
+        from unittest.mock import MagicMock, patch
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+        from ioe_crypto import compress_encrypt
+
+        req = {"id": "test-id-1", "cmd": "SEARCH", "query": "test query", "user_id": "u1"}
+        encrypted = compress_encrypt(ioe_server.IOE_KEY, json.dumps(req)).encode("ascii")
+
+        msg = MIMEMultipart()
+        part = MIMEBase("application", "pdf")
+        part.set_payload(encrypted)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="x.pdf")
+        msg.attach(part)
+
+        appended = []
+        mock_client = MagicMock()
+        mock_client.append = lambda folder, data: appended.append(data)
+
+        ioe_server._processed_uids.discard(6666)
+
+        with (
+            patch.object(ioe_server, "do_search", return_value=[{"title": "r", "href": "h", "snippet": "s"}]),
+            patch.object(ioe_server, "check_rate_limit"),
+        ):
+            result = ioe_server.process_message(mock_client, 6666, msg.as_bytes())
+
+        assert result is True
+        assert 6666 in ioe_server._processed_uids
+        ioe_server._processed_uids.discard(6666)
+
+    def test_text_команда_обрабатывается(self):
+        import ioe_server
+        import json
+        from unittest.mock import MagicMock, patch
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+        from ioe_crypto import compress_encrypt
+
+        req = {"id": "text-id-1", "cmd": "TEXT", "url": "https://example.com", "user_id": "u1"}
+        encrypted = compress_encrypt(ioe_server.IOE_KEY, json.dumps(req)).encode("ascii")
+
+        msg = MIMEMultipart()
+        part = MIMEBase("application", "pdf")
+        part.set_payload(encrypted)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="x.pdf")
+        msg.attach(part)
+
+        mock_client = MagicMock()
+        ioe_server._processed_uids.discard(5555)
+
+        with (
+            patch.object(ioe_server, "fetch_text", return_value="plain text content"),
+            patch.object(ioe_server, "check_rate_limit"),
+        ):
+            result = ioe_server.process_message(mock_client, 5555, msg.as_bytes())
+
+        assert result is True
+        ioe_server._processed_uids.discard(5555)
+
+    def test_get_команда_обрабатывается(self):
+        import ioe_server
+        import json
+        from unittest.mock import MagicMock, patch
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+        from ioe_crypto import compress_encrypt
+
+        req = {"id": "get-id-1", "cmd": "GET", "url": "https://example.com", "user_id": "u1"}
+        encrypted = compress_encrypt(ioe_server.IOE_KEY, json.dumps(req)).encode("ascii")
+
+        msg = MIMEMultipart()
+        part = MIMEBase("application", "pdf")
+        part.set_payload(encrypted)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="x.pdf")
+        msg.attach(part)
+
+        mock_client = MagicMock()
+        ioe_server._processed_uids.discard(4444)
+
+        extract_result = {
+            "format": "markdown",
+            "type": "article",
+            "title": "Test",
+            "body": "body content",
+            "domain": "example.com",
+            "word_count": 2,
+        }
+        with (
+            patch.object(ioe_server, "smart_extract", return_value=extract_result),
+            patch.object(ioe_server, "check_rate_limit"),
+        ):
+            result = ioe_server.process_message(mock_client, 4444, msg.as_bytes())
+
+        assert result is True
+        ioe_server._processed_uids.discard(4444)
+
+
+class TestClaudeChatActions:
+    def test_send_action_вызывает_send_message(self):
+        import ioe_server
+        from unittest.mock import MagicMock
+
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = {"status": 200, "text": "hi"}
+        original = ioe_server._claude_chat
+        ioe_server._claude_chat = mock_chat
+        try:
+            result = ioe_server.handle_claude_chat({"action": "send", "user_id": "u1", "text": "hello"})
+            mock_chat.send_message.assert_called_once_with("u1", "hello", None)
+        finally:
+            ioe_server._claude_chat = original
+
+    def test_check_auth_action(self):
+        import ioe_server
+        from unittest.mock import MagicMock
+
+        mock_chat = MagicMock()
+        mock_chat.check_auth.return_value = {"status": 200, "authenticated": True}
+        original = ioe_server._claude_chat
+        ioe_server._claude_chat = mock_chat
+        try:
+            ioe_server.handle_claude_chat({"action": "check_auth", "user_id": "u1"})
+            mock_chat.check_auth.assert_called_once()
+        finally:
+            ioe_server._claude_chat = original
+
+    def test_new_conversation_action(self):
+        import ioe_server
+        from unittest.mock import MagicMock
+
+        mock_chat = MagicMock()
+        mock_chat.new_conversation.return_value = {"status": 200}
+        original = ioe_server._claude_chat
+        ioe_server._claude_chat = mock_chat
+        try:
+            ioe_server.handle_claude_chat({"action": "new_conversation", "user_id": "u1"})
+            mock_chat.new_conversation.assert_called_once_with("u1")
+        finally:
+            ioe_server._claude_chat = original
+
+
+class TestProcessMessageEdgeCases:
+    def _make_encrypted_msg(self, ioe_server, req):
+        import json
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+        from ioe_crypto import compress_encrypt
+
+        encrypted = compress_encrypt(ioe_server.IOE_KEY, json.dumps(req)).encode("ascii")
+        msg = MIMEMultipart()
+        part = MIMEBase("application", "pdf")
+        part.set_payload(encrypted)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="x.pdf")
+        msg.attach(part)
+        return msg.as_bytes()
+
+    def test_update_команда_обрабатывается(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        req = {"id": "upd-id-1", "cmd": "UPDATE", "user_id": "u1"}
+        raw = self._make_encrypted_msg(ioe_server, req)
+
+        mock_client = MagicMock()
+        ioe_server._processed_uids.discard(3333)
+
+        with patch.object(ioe_server, "check_rate_limit"):
+            result = ioe_server.process_message(mock_client, 3333, raw)
+
+        assert result is True
+        ioe_server._processed_uids.discard(3333)
+
+    def test_text_усечение_длинного_контента(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        req = {"id": "trunc-1", "cmd": "TEXT", "url": "https://example.com", "user_id": "u1"}
+        raw = self._make_encrypted_msg(ioe_server, req)
+
+        mock_client = MagicMock()
+        ioe_server._processed_uids.discard(2222)
+
+        long_text = "a" * (ioe_server.MAX_BODY + 100)
+        with (
+            patch.object(ioe_server, "fetch_text", return_value=long_text),
+            patch.object(ioe_server, "check_rate_limit"),
+        ):
+            result = ioe_server.process_message(mock_client, 2222, raw)
+
+        assert result is True
+        ioe_server._processed_uids.discard(2222)
+
+    def test_исключение_в_обработчике_возвращает_true(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        req = {"id": "err-1", "cmd": "SEARCH", "query": "q", "user_id": "u1"}
+        raw = self._make_encrypted_msg(ioe_server, req)
+
+        mock_client = MagicMock()
+        ioe_server._processed_uids.discard(1111)
+
+        with (
+            patch.object(ioe_server, "do_search", side_effect=RuntimeError("boom")),
+            patch.object(ioe_server, "check_rate_limit"),
+        ):
+            result = ioe_server.process_message(mock_client, 1111, raw)
+
+        assert result is True
+        ioe_server._processed_uids.discard(1111)
+
+
+class TestInlineImagesEdgeCases:
+    def test_превышение_max_images_удаляет_лишние(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        small_jpeg = b"\xff\xd8\xff" + b"\x00" * 100
+
+        class MockResp:
+            headers = {"Content-Length": "103"}
+            content = small_jpeg
+
+        mock_pil_img = MagicMock()
+        mock_pil_img.width = 400
+        mock_pil_img.height = 300
+        converted = MagicMock()
+
+        def fake_save(buf, fmt, **kw):
+            buf.write(b"fake")
+
+        converted.save = fake_save
+        mock_pil_img.convert.return_value = converted
+
+        original_get = ioe_server.requests.get
+        ioe_server.requests.get = lambda *a, **kw: MockResp()
+        with patch.object(ioe_server.Image, "open", return_value=mock_pil_img):
+            try:
+                imgs = "".join(f'<img src="https://example.com/img{i}.jpg">' for i in range(12))
+                html = f"<html><body>{imgs}</body></html>"
+                result = ioe_server.inline_images(html, "https://example.com/", max_images=2)
+                count = result.count("data:image/jpeg;base64,")
+                assert count <= 2
+            finally:
+                ioe_server.requests.get = original_get
+
+    def test_resize_широкого_изображения(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        small_jpeg = b"\xff\xd8\xff" + b"\x00" * 100
+
+        class MockResp:
+            headers = {"Content-Length": "103"}
+            content = small_jpeg
+
+        mock_pil_img = MagicMock()
+        mock_pil_img.width = 1200
+        mock_pil_img.height = 900
+        resized = MagicMock()
+        resized.width = 800
+        converted = MagicMock()
+
+        def fake_save(buf, fmt, **kw):
+            buf.write(b"fake")
+
+        converted.save = fake_save
+        resized.convert.return_value = converted
+        mock_pil_img.resize.return_value = resized
+
+        original_get = ioe_server.requests.get
+        ioe_server.requests.get = lambda *a, **kw: MockResp()
+        with patch.object(ioe_server.Image, "open", return_value=mock_pil_img):
+            try:
+                html = '<html><body><img src="https://example.com/wide.jpg"></body></html>'
+                result = ioe_server.inline_images(html, "https://example.com/")
+                mock_pil_img.resize.assert_called_once()
+                assert "data:image/jpeg;base64," in result
+            finally:
+                ioe_server.requests.get = original_get
+
+    def test_невалидный_url_изображения_удаляется(self):
+        import ioe_server
+
+        html = '<html><body><img src="file:///etc/passwd"></body></html>'
+        result = ioe_server.inline_images(html, "https://example.com/")
+        assert "file:///etc/passwd" not in result
+        assert "data:image/jpeg;base64," not in result
+
+
+class TestFetchReadable:
+    def test_fetch_readable_возвращает_title_и_content(self):
+        import types
+        import ioe_server
+        from unittest.mock import patch
+
+        mock_resp = types.SimpleNamespace(
+            text="<html><body><h1>Title</h1><p>Content</p></body></html>",
+            status_code=200,
+            raise_for_status=lambda: None,
+        )
+        original_get = ioe_server.requests.get
+        ioe_server.requests.get = lambda *a, **kw: mock_resp
+
+        mock_doc = types.SimpleNamespace(
+            title=lambda: "Article Title",
+            summary=lambda: "<p>Content</p>",
+        )
+        with (
+            patch.object(ioe_server, "inline_images", return_value="<p>Content</p>"),
+            patch.object(ioe_server, "Document", return_value=mock_doc),
+        ):
+            try:
+                title, content = ioe_server.fetch_readable("https://example.com/article")
+                assert title == "Article Title"
+                assert "Content" in content
+            finally:
+                ioe_server.requests.get = original_get
+
+
+class TestInlineImagesContentSize:
+    def test_данные_больше_лимита_после_загрузки_удаляет_img(self):
+        import ioe_server
+
+        large_size = ioe_server.MAX_IMAGE_BYTES + 1
+
+        class MockResp:
+            headers = {"Content-Length": "0"}
+            content = b"x" * large_size
+
+        original_get = ioe_server.requests.get
+        ioe_server.requests.get = lambda *a, **kw: MockResp()
+        try:
+            html = '<html><body><img src="https://example.com/big2.jpg"></body></html>'
+            result = ioe_server.inline_images(html, "https://example.com/")
+            assert "data:image/jpeg;base64," not in result
+        finally:
+            ioe_server.requests.get = original_get
+
+    def test_изображение_с_низким_quality_при_большом_буфере(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        small_jpeg = b"\xff\xd8\xff" + b"\x00" * 100
+
+        class MockResp:
+            headers = {"Content-Length": "103"}
+            content = small_jpeg
+
+        mock_pil_img = MagicMock()
+        mock_pil_img.width = 400
+        mock_pil_img.height = 300
+        converted = MagicMock()
+
+        call_count = [0]
+
+        def fake_save(buf, fmt, **kw):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                buf.write(b"x" * (81 * 1024))
+            else:
+                buf.write(b"small")
+
+        converted.save = fake_save
+        mock_pil_img.convert.return_value = converted
+
+        original_get = ioe_server.requests.get
+        ioe_server.requests.get = lambda *a, **kw: MockResp()
+        with patch.object(ioe_server.Image, "open", return_value=mock_pil_img):
+            try:
+                html = '<html><body><img src="https://example.com/heavy.jpg"></body></html>'
+                result = ioe_server.inline_images(html, "https://example.com/")
+                assert call_count[0] == 2
+            finally:
+                ioe_server.requests.get = original_get
+
+
+class TestProcessMessageDispatch:
+    def _make_encrypted_msg(self, ioe_server, req):
+        import json
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+        from ioe_crypto import compress_encrypt
+
+        encrypted = compress_encrypt(ioe_server.IOE_KEY, json.dumps(req)).encode("ascii")
+        msg = MIMEMultipart()
+        part = MIMEBase("application", "pdf")
+        part.set_payload(encrypted)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="x.pdf")
+        msg.attach(part)
+        return msg.as_bytes()
+
+    def test_dispatch_тип_session_start_через_process_message(self):
+        import ioe_server
+        from unittest.mock import MagicMock
+
+        ioe_server.requests.Session = type("S", (), {"close": lambda s: None})
+        req = {"id": "disp-1", "type": "session_start", "session_id": "pm-test-s1", "user_id": "u1"}
+        raw = self._make_encrypted_msg(ioe_server, req)
+
+        mock_client = MagicMock()
+        ioe_server._processed_uids.discard(9001)
+
+        result = ioe_server.process_message(mock_client, 9001, raw)
+        assert result is True
+        ioe_server._processed_uids.discard(9001)
+        ioe_server._sessions.pop("pm-test-s1", None)
+
+    def test_get_команда_усечение_тела(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        req = {"id": "trunc-get-1", "cmd": "GET", "url": "https://example.com", "user_id": "u1"}
+        raw = self._make_encrypted_msg(ioe_server, req)
+
+        mock_client = MagicMock()
+        ioe_server._processed_uids.discard(9002)
+
+        long_body = "b" * (ioe_server.MAX_BODY + 500)
+        extract_result = {
+            "format": "html",
+            "type": "page",
+            "title": "T",
+            "body": long_body,
+            "domain": "example.com",
+            "word_count": 1,
+        }
+        with (
+            patch.object(ioe_server, "smart_extract", return_value=extract_result),
+            patch.object(ioe_server, "check_rate_limit"),
+        ):
+            result = ioe_server.process_message(mock_client, 9002, raw)
+
+        assert result is True
+        ioe_server._processed_uids.discard(9002)

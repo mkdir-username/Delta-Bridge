@@ -95,3 +95,87 @@ class TestClient:
 
         with patch.object(sys, "argv", ["client.py"]), pytest.raises(SystemExit):
             client.main()
+
+    def test_imap_conn_логинится(self):
+        mock_imap = MagicMock()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            conn = client.imap_conn()
+            mock_imap.login.assert_called_once_with(client.EMAIL, client.PASSWORD)
+            assert conn is mock_imap
+
+    def test_main_search_отправляет_запрос_и_печатает_результат(self, capsys):
+        response = {"id": "x", "status": 200, "title": "", "body": "result text"}
+        mock_imap = MagicMock()
+        with (
+            patch.object(sys, "argv", ["client.py", "search", "python news"]),
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch.object(client, "send_request", return_value="x") as mock_send,
+            patch.object(client, "wait_response", return_value=response),
+            patch("time.sleep"),
+        ):
+            client.main()
+        out = capsys.readouterr().out
+        assert "result text" in out
+        mock_send.assert_called_once()
+        args = mock_send.call_args[0]
+        assert args[1]["cmd"] == "SEARCH"
+        assert args[1]["query"] == "python news"
+
+    def test_main_update_записывает_файлы(self, tmp_path, capsys):
+        fname = "ioe_test_update.py"
+        response = {"id": "x", "status": 200, "cmd": "UPDATE", "files": {fname: "print('hello')"}}
+        mock_imap = MagicMock()
+        with (
+            patch.object(sys, "argv", ["client.py", "update"]),
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch.object(client, "send_request", return_value="x"),
+            patch.object(client, "wait_response", return_value=response),
+            patch("time.sleep"),
+            patch("os.path.expanduser", return_value=str(tmp_path / fname)),
+        ):
+            client.main()
+        out = capsys.readouterr().out
+        assert "Updated" in out
+        assert (tmp_path / fname).read_text() == "print('hello')"
+
+    def test_main_нет_ответа_печатает_timeout(self, capsys):
+        mock_imap = MagicMock()
+        with (
+            patch.object(sys, "argv", ["client.py", "get", "https://example.com"]),
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch.object(client, "send_request", return_value="x"),
+            patch.object(client, "wait_response", return_value=None),
+            patch("time.sleep"),
+        ):
+            client.main()
+        out = capsys.readouterr().out
+        assert "Timeout" in out
+
+    def test_main_error_response_печатает_ошибку(self, capsys):
+        response = {"id": "x", "status": 500, "error": "something broke"}
+        mock_imap = MagicMock()
+        with (
+            patch.object(sys, "argv", ["client.py", "get", "https://example.com"]),
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch.object(client, "send_request", return_value="x"),
+            patch.object(client, "wait_response", return_value=response),
+            patch("time.sleep"),
+        ):
+            client.main()
+        out = capsys.readouterr().out
+        assert "something broke" in out
+
+    def test_main_html_body_парсится_через_bs4(self, capsys):
+        response = {"id": "x", "status": 200, "title": "Title", "body": "<p>Hello <b>world</b></p>"}
+        mock_imap = MagicMock()
+        with (
+            patch.object(sys, "argv", ["client.py", "get", "https://example.com"]),
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch.object(client, "send_request", return_value="x"),
+            patch.object(client, "wait_response", return_value=response),
+            patch("time.sleep"),
+        ):
+            client.main()
+        out = capsys.readouterr().out
+        assert "Hello" in out
+        assert "world" in out
