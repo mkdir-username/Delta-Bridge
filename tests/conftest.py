@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import sys
 import socket
 import pytest
 
 _root = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, _root)
 
 
 @pytest.fixture(autouse=True, scope="session")

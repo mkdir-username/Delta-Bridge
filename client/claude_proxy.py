@@ -17,7 +17,8 @@ from email import encoders
 from typing import Any
 import email as email_mod
 
-from crypto import derive_key, compress_encrypt, decrypt_decompress
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from ioe_crypto import derive_key, compress_encrypt, decrypt_decompress
 
 logging.basicConfig(
     level=logging.INFO,

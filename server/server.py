@@ -30,7 +30,8 @@ from readability import Document
 from PIL import Image
 import requests
 
-from crypto import derive_key, encrypt, decrypt, compress_encrypt, decrypt_decompress
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from ioe_crypto import derive_key, encrypt, decrypt, compress_encrypt, decrypt_decompress
 
 try:
     from browser_handler import handle_browser_request
@@ -200,10 +201,13 @@ def make_envelope(encrypted_bytes: bytes) -> MIMEMultipart:
 
 
 def append_response(client: Any, response_dict: dict[str, Any]) -> None:
+    rid = response_dict.get("id", "?")
+    log.debug("append_response: id=%s status=%s", rid, response_dict.get("status", "?"))
     payload = json.dumps(response_dict, ensure_ascii=False)
     encrypted = encrypt(IOE_KEY, payload).encode("ascii")
     msg = make_envelope(encrypted)
     client.append("INBOX", msg.as_bytes())
+    log.info("append_response: APPEND OK id=%s", rid)
 
 
 def fetch_text(url: str) -> str:
@@ -604,6 +608,7 @@ def dispatch_request(request: dict[str, Any]) -> Optional[dict[str, Any]]:
 
 
 def process_message(client: Any, uid: int, raw: bytes) -> bool:
+    log.debug("process_message: enter uid=%s", uid)
     if uid in _processed_uids:
         log.info("uid=%s already processed, skipping", uid)
         return True
@@ -711,6 +716,9 @@ def _acquire_lock() -> Any:
     return fd
 
 
+RECONNECT_INTERVAL = 300
+
+
 def main() -> None:
     _lock_fd = _acquire_lock()  # noqa: F841 — prevent GC releasing the lock
     log.info("IoE server v2 starting")
@@ -720,9 +728,15 @@ def main() -> None:
                 client.login(EMAIL, PASSWORD)
                 client.select_folder(QUEUE_FOLDER)
                 log.info("Connected, monitoring folder '%s'", QUEUE_FOLDER)
+                connected_at = time.time()
                 while True:
+                    if time.time() - connected_at > RECONNECT_INTERVAL:
+                        log.info("Reconnecting (stale prevention, %ds)", RECONNECT_INTERVAL)
+                        break
                     client.noop()
                     messages = client.search(["ALL"])
+                    if messages:
+                        log.info("mainloop: search found %d uids: %s", len(messages), messages[:10])
                     for uid in messages:
                         data = client.fetch([uid], ["RFC822"])
                         raw = data[uid][b"RFC822"]

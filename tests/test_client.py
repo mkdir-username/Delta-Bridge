@@ -13,7 +13,7 @@ os.environ.setdefault("IMAP_PASSWORD", "test")
 os.environ.setdefault("IOE_SECRET", "secret123")
 
 import client
-from crypto import encrypt, derive_key
+from ioe_crypto import encrypt, derive_key
 
 IOE_KEY = derive_key(os.environ["IOE_SECRET"])
 

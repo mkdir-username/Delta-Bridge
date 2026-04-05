@@ -19,7 +19,8 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-from crypto import derive_key, encrypt, decrypt
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from ioe_crypto import derive_key, encrypt, decrypt
 
 log = logging.getLogger("ioe-web")
 logging.basicConfig(
