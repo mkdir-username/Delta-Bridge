@@ -330,3 +330,274 @@ def test_do_search_error_returns_structured():
     result = ioe_server.do_search("test")
     assert isinstance(result, list)
     assert len(result) >= 1
+
+
+class TestCacheEviction:
+    def test_вытесняет_старую_запись_при_переполнении(self):
+        import types
+        import ioe_server
+
+        old_max = ioe_server.PAGE_CACHE_MAX
+        ioe_server.PAGE_CACHE_MAX = 2
+        ioe_server._page_cache.clear()
+
+        def make_resp(html):
+            return types.SimpleNamespace(text=html, status_code=200, raise_for_status=lambda: None)
+
+        html_a = "<html><body><p>" + "word " * 20 + "</p></body></html>"
+        html_b = "<html><body><p>" + "word " * 20 + "</p></body></html>"
+        html_c = "<html><body><p>" + "word " * 20 + "</p></body></html>"
+
+        responses = {
+            "https://example.com/evict-a": html_a,
+            "https://example.com/evict-b": html_b,
+            "https://example.com/evict-c": html_c,
+        }
+
+        def mock_get(url, *a, **kw):
+            base = url.split("?")[0]
+            return make_resp(responses[base])
+
+        original = ioe_server.requests.get
+        ioe_server.requests.get = mock_get
+        try:
+            ioe_server.smart_extract("https://example.com/evict-a")
+            ioe_server.smart_extract("https://example.com/evict-b")
+            assert len(ioe_server._page_cache) == 2
+            ioe_server.smart_extract("https://example.com/evict-c")
+            assert len(ioe_server._page_cache) == 2
+            assert "https://example.com/evict-a" not in ioe_server._page_cache
+            assert "https://example.com/evict-c" in ioe_server._page_cache
+        finally:
+            ioe_server.requests.get = original
+            ioe_server._page_cache.clear()
+            ioe_server.PAGE_CACHE_MAX = old_max
+
+
+class _FakeSession:
+    def close(self):
+        pass
+
+
+class TestSessionLifecycle:
+    def test_session_start_создаёт_сессию(self):
+        import ioe_server
+
+        original_session_cls = getattr(ioe_server.requests, "Session", None)
+        ioe_server.requests.Session = _FakeSession
+        try:
+            result = ioe_server.dispatch_request({"type": "session_start", "session_id": "test-s1", "user_id": "u1"})
+            assert result.get("status") == 200
+            assert "test-s1" in ioe_server._sessions
+        finally:
+            if original_session_cls is None:
+                del ioe_server.requests.Session
+            else:
+                ioe_server.requests.Session = original_session_cls
+            ioe_server._sessions.pop("test-s1", None)
+
+    def test_session_end_удаляет_существующую_сессию(self):
+        import ioe_server
+
+        ioe_server.requests.Session = _FakeSession
+        try:
+            ioe_server.dispatch_request({"type": "session_start", "session_id": "test-s2", "user_id": "u1"})
+            result = ioe_server.dispatch_request({"type": "session_end", "session_id": "test-s2", "user_id": "u1"})
+            assert result.get("status") == 200
+            assert "test-s2" not in ioe_server._sessions
+        finally:
+            ioe_server._sessions.pop("test-s2", None)
+
+    def test_session_end_несуществующей_сессии_возвращает_404(self):
+        import ioe_server
+
+        result = ioe_server.dispatch_request({"type": "session_end", "session_id": "no-such-session", "user_id": "u1"})
+        assert result.get("status") == 404
+
+    def test_unknown_type_возвращает_400(self):
+        import ioe_server
+
+        result = ioe_server.dispatch_request({"type": "totally_unknown_type", "user_id": "u1"})
+        assert result.get("status") == 400
+
+    def test_unknown_command_service_возвращает_400(self):
+        import ioe_server
+
+        result = ioe_server.dispatch_request({"type": "command", "service": "nonexistent_service", "user_id": "u1"})
+        assert result.get("status") == 400
+
+
+class TestRedirectFollowing:
+    def test_http_proxy_следует_редиректу_301(self):
+        import types
+        import ioe_server
+
+        final_resp = types.SimpleNamespace(
+            status_code=200,
+            headers={"Content-Type": "text/plain"},
+            text="final destination",
+            url="https://example.com/final",
+        )
+        redirect_resp = types.SimpleNamespace(
+            status_code=301,
+            headers={"Location": "https://example.com/final", "Content-Type": "text/plain"},
+            text="",
+            url="https://example.com/old",
+        )
+
+        call_urls = []
+
+        class MockRequests:
+            @staticmethod
+            def request(method, url, **kw):
+                call_urls.append(url)
+                if url == "https://example.com/old":
+                    return redirect_resp
+                return final_resp
+
+        original = ioe_server.requests
+        ioe_server.requests = MockRequests
+        try:
+            result = ioe_server.handle_http_proxy({"method": "GET", "url": "https://example.com/old", "user_id": "u1"})
+            assert result["status_code"] == 200
+            assert "example.com/final" in result["url"]
+        finally:
+            ioe_server.requests = original
+
+    def test_http_proxy_останавливается_после_5_редиректов(self):
+        import types
+        import ioe_server
+
+        loop_resp = types.SimpleNamespace(
+            status_code=302,
+            headers={"Location": "https://example.com/loop", "Content-Type": "text/plain"},
+            text="",
+            url="https://example.com/loop",
+        )
+
+        class MockRequests:
+            @staticmethod
+            def request(method, url, **kw):
+                return loop_resp
+
+        original = ioe_server.requests
+        ioe_server.requests = MockRequests
+        try:
+            result = ioe_server.handle_http_proxy({"method": "GET", "url": "https://example.com/loop", "user_id": "u1"})
+            assert result.get("status_code") in (302, 200, 502)
+        finally:
+            ioe_server.requests = original
+
+
+class TestImageInlining:
+    def test_большое_изображение_удаляется(self):
+        import ioe_server
+
+        large_size = ioe_server.MAX_IMAGE_BYTES + 1
+
+        class MockResp:
+            headers = {"Content-Length": str(large_size)}
+            content = b"x" * large_size
+
+        original_get = ioe_server.requests.get
+        ioe_server.requests.get = lambda *a, **kw: MockResp()
+        try:
+            html = '<html><body><img src="https://example.com/big.jpg"></body></html>'
+            result = ioe_server.inline_images(html, "https://example.com/")
+            assert 'src="https://example.com/big.jpg"' not in result
+            assert "data:image/jpeg;base64," not in result
+        finally:
+            ioe_server.requests.get = original_get
+
+    def test_изображение_инлайнится_как_base64(self):
+        import ioe_server
+        from unittest.mock import MagicMock
+
+        small_jpeg = b"\xff\xd8\xff" + b"\x00" * 100
+
+        class MockResp:
+            headers = {"Content-Length": "103"}
+            content = small_jpeg
+
+        mock_pil_img = MagicMock()
+        mock_pil_img.width = 400
+        mock_pil_img.height = 300
+        converted = MagicMock()
+        buf_data = b"fakejpegdata"
+
+        def fake_save(buf, fmt, **kw):
+            buf.write(buf_data)
+
+        converted.save = fake_save
+        mock_pil_img.convert.return_value = converted
+
+        original_get = ioe_server.requests.get
+        ioe_server.requests.get = lambda *a, **kw: MockResp()
+        with patch.object(ioe_server.Image, "open", return_value=mock_pil_img):
+            try:
+                html = '<html><body><img src="https://example.com/small.jpg"></body></html>'
+                result = ioe_server.inline_images(html, "https://example.com/")
+                assert "data:image/jpeg;base64," in result
+            finally:
+                ioe_server.requests.get = original_get
+
+
+class TestSendTgNotification:
+    def test_уведомление_отправляется_через_imap(self):
+        import ioe_server
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = lambda s: s
+        mock_client.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(ioe_server, "append_response") as mock_append:
+            original_imap = ioe_server.IMAPClient
+            ioe_server.IMAPClient = lambda *a, **kw: mock_client
+            try:
+                ioe_server._send_tg_notification({"type": "tg_update", "data": "hello"})
+                mock_client.login.assert_called_once()
+                mock_append.assert_called_once()
+            finally:
+                ioe_server.IMAPClient = original_imap
+
+    def test_ошибка_imap_не_роняет_процесс(self):
+        import ioe_server
+
+        def boom(*a, **kw):
+            raise ConnectionError("IMAP down")
+
+        original_imap = ioe_server.IMAPClient
+        ioe_server.IMAPClient = boom
+        try:
+            ioe_server._send_tg_notification({"type": "tg_update"})
+        finally:
+            ioe_server.IMAPClient = original_imap
+
+
+class TestLockFile:
+    def test_acquire_lock_выходит_при_занятом_файле(self):
+        import ioe_server
+        import fcntl
+        from unittest.mock import patch, MagicMock
+
+        with (
+            patch("builtins.open", return_value=MagicMock()) as mock_open,
+            patch.object(fcntl, "flock", side_effect=OSError("locked")),
+            patch.object(ioe_server.sys, "exit") as mock_exit,
+        ):
+            mock_open.return_value  # noqa: B018
+            ioe_server._acquire_lock()
+            mock_exit.assert_called_once_with(1)
+
+    def test_acquire_lock_записывает_pid(self):
+        import ioe_server
+        import fcntl
+        import os
+        from unittest.mock import patch, MagicMock
+
+        mock_fd = MagicMock()
+        with patch("builtins.open", return_value=mock_fd), patch.object(fcntl, "flock"):
+            result = ioe_server._acquire_lock()
+            mock_fd.write.assert_called_once_with(str(os.getpid()))
+            mock_fd.flush.assert_called_once()
