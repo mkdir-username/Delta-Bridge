@@ -22,3 +22,18 @@ module = [
     "requests.*",
 ]
 ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "SIM", "UP", "PT"]
+ignore = ["E402", "E501", "PT009", "PT011", "PT013", "PT015", "PT017", "SIM105", "SIM108", "SIM115", "F841"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=server --cov=client --cov=webui --cov=ioe_types --cov=ioe_crypto --cov-report=term-missing --cov-fail-under=50"

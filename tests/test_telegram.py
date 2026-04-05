@@ -1,5 +1,5 @@
 """Tests for Telegram adapter (Phase 4)."""
-import json
+
 import sys
 import os
 import types
@@ -12,9 +12,21 @@ os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "pass")
 os.environ.setdefault("IOE_SECRET", "secret123")
 
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 
-for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests", "trafilatura", "telethon", "telethon.tl", "telethon.tl.functions", "telethon.tl.functions.messages"]:
+for _mod in [
+    "truststore",
+    "imapclient",
+    "readability",
+    "PIL",
+    "PIL.Image",
+    "requests",
+    "trafilatura",
+    "telethon",
+    "telethon.tl",
+    "telethon.tl.functions",
+    "telethon.tl.functions.messages",
+]:
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
 
@@ -27,27 +39,47 @@ _mock_events.NewMessage = MagicMock()
 sys.modules["telethon.events"] = _mock_events
 sys.modules["telethon"].events = _mock_events
 
+
 class _RPCError(Exception):
     def __init__(self, *a, **kw):
         self.seconds = kw.get("seconds", 0)
         super().__init__(str(kw))
 
+
 _mock_errors = types.ModuleType("telethon.errors")
 _mock_errors.AuthKeyUnregisteredError = type("AuthKeyUnregisteredError", (_RPCError,), {})
 _mock_errors.SessionPasswordNeededError = type("SessionPasswordNeededError", (_RPCError,), {})
 _mock_errors.PhoneCodeInvalidError = type("PhoneCodeInvalidError", (_RPCError,), {})
-_mock_errors.FloodWaitError = type("FloodWaitError", (_RPCError,), {"__init__": lambda self, *a, **kw: (_RPCError.__init__(self, *a, **kw), setattr(self, "seconds", kw.get("seconds", 0)))[0]})
+_mock_errors.FloodWaitError = type(
+    "FloodWaitError",
+    (_RPCError,),
+    {
+        "__init__": lambda self, *a, **kw: (
+            _RPCError.__init__(self, *a, **kw),
+            setattr(self, "seconds", kw.get("seconds", 0)),
+        )[0]
+    },
+)
 sys.modules["telethon.errors"] = _mock_errors
 if "telegram_adapter" in sys.modules:
     import importlib
+
     importlib.reload(sys.modules["telegram_adapter"])
 sys.modules["truststore"].inject_into_ssl = lambda: None
 sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 
+
 class _MockDoc:
-    def __init__(self, html=""): pass
-    def title(self): return ""
-    def summary(self): return ""
+    def __init__(self, html=""):
+        pass
+
+    def title(self):
+        return ""
+
+    def summary(self):
+        return ""
+
+
 sys.modules["readability"].Document = _MockDoc
 
 _mock_img = MagicMock()
@@ -73,99 +105,130 @@ def _mock_adapter(return_value):
 class TestDispatchTelegram:
     def test_command_telegram_routes_to_adapter(self):
         from server import dispatch_request
+
         with _mock_adapter({"status": 200, "dialogs": []}) as p:
-            result = dispatch_request({
-                "type": "command",
-                "service": "telegram",
-                "action": "get_dialogs",
-            })
+            result = dispatch_request(
+                {
+                    "type": "command",
+                    "service": "telegram",
+                    "action": "get_dialogs",
+                }
+            )
         assert result["status"] == 200
         p.return_value.handle.assert_called_once()
 
     def test_command_unknown_service_returns_error(self):
         from server import dispatch_request
-        result = dispatch_request({
-            "type": "command",
-            "service": "unknown_service",
-            "action": "test",
-        })
+
+        result = dispatch_request(
+            {
+                "type": "command",
+                "service": "unknown_service",
+                "action": "test",
+            }
+        )
         assert result.get("status") == 400
         assert "error" in result
 
     def test_command_telegram_get_dialogs(self):
         from server import dispatch_request
-        with _mock_adapter({
-            "status": 200,
-            "dialogs": [
-                {"id": 1, "name": "Test Chat", "unread": 5},
-                {"id": 2, "name": "Another", "unread": 0},
-            ],
-        }):
-            result = dispatch_request({
-                "type": "command",
-                "service": "telegram",
-                "action": "get_dialogs",
-            })
+
+        with _mock_adapter(
+            {
+                "status": 200,
+                "dialogs": [
+                    {"id": 1, "name": "Test Chat", "unread": 5},
+                    {"id": 2, "name": "Another", "unread": 0},
+                ],
+            }
+        ):
+            result = dispatch_request(
+                {
+                    "type": "command",
+                    "service": "telegram",
+                    "action": "get_dialogs",
+                }
+            )
         assert result["status"] == 200
         assert len(result["dialogs"]) == 2
         assert result["dialogs"][0]["unread"] == 5
 
     def test_command_telegram_get_messages(self):
         from server import dispatch_request
-        with _mock_adapter({
-            "status": 200,
-            "messages": [
-                {"id": 100, "sender": "Alice", "text": "Hello", "date": "2026-03-30T10:00:00"},
-            ],
-        }):
-            result = dispatch_request({
-                "type": "command",
-                "service": "telegram",
-                "action": "get_messages",
-                "chat_id": 1,
-                "limit": 20,
-            })
+
+        with _mock_adapter(
+            {
+                "status": 200,
+                "messages": [
+                    {
+                        "id": 100,
+                        "sender": "Alice",
+                        "text": "Hello",
+                        "date": "2026-03-30T10:00:00",
+                    },
+                ],
+            }
+        ):
+            result = dispatch_request(
+                {
+                    "type": "command",
+                    "service": "telegram",
+                    "action": "get_messages",
+                    "chat_id": 1,
+                    "limit": 20,
+                }
+            )
         assert result["status"] == 200
         assert len(result["messages"]) == 1
 
     def test_command_telegram_send_message(self):
         from server import dispatch_request
+
         with _mock_adapter({"status": 200, "message_id": 101}):
-            result = dispatch_request({
-                "type": "command",
-                "service": "telegram",
-                "action": "send_message",
-                "chat_id": 1,
-                "text": "Hello from IoE",
-            })
+            result = dispatch_request(
+                {
+                    "type": "command",
+                    "service": "telegram",
+                    "action": "send_message",
+                    "chat_id": 1,
+                    "text": "Hello from IoE",
+                }
+            )
         assert result["status"] == 200
         assert result["message_id"] == 101
 
     def test_command_telegram_mark_read(self):
         from server import dispatch_request
+
         with _mock_adapter({"status": 200}):
-            result = dispatch_request({
-                "type": "command",
-                "service": "telegram",
-                "action": "mark_read",
-                "chat_id": 1,
-            })
+            result = dispatch_request(
+                {
+                    "type": "command",
+                    "service": "telegram",
+                    "action": "mark_read",
+                    "chat_id": 1,
+                }
+            )
         assert result["status"] == 200
 
     def test_telegram_not_available(self):
         from server import dispatch_request
+
         with patch("server._get_telegram_adapter", return_value=None):
-            result = dispatch_request({
-                "type": "command",
-                "service": "telegram",
-                "action": "get_dialogs",
-            })
+            result = dispatch_request(
+                {
+                    "type": "command",
+                    "service": "telegram",
+                    "action": "get_dialogs",
+                }
+            )
         assert result["status"] == 503
 
 
 class TestTelegramAdapter:
     def _make_adapter(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {"default": MagicMock()}
         adapter.client = None
@@ -177,9 +240,7 @@ class TestTelegramAdapter:
 
     def test_handle_dispatches_action(self):
         adapter = self._make_adapter()
-        adapter._run_sync = MagicMock(return_value=[
-            {"id": 1, "name": "Chat", "unread": 0}
-        ])
+        adapter._run_sync = MagicMock(return_value=[{"id": 1, "name": "Chat", "unread": 0}])
         result = adapter.handle("get_dialogs", {})
         assert result["status"] == 200
 
@@ -207,6 +268,7 @@ class TestTelegramAdapter:
 class TestMultiUserTelegram:
     def test_clients_dict_initialized(self):
         from telegram_adapter import TelegramAdapter
+
         with patch("telegram_adapter.TELETHON_AVAILABLE", True):
             adapter = TelegramAdapter(api_id=123, api_hash="abc")
         assert hasattr(adapter, "clients")
@@ -215,6 +277,7 @@ class TestMultiUserTelegram:
 
     def test_auth_state_initialized(self):
         from telegram_adapter import TelegramAdapter
+
         with patch("telegram_adapter.TELETHON_AVAILABLE", True):
             adapter = TelegramAdapter(api_id=123, api_hash="abc")
         assert hasattr(adapter, "_auth_state")
@@ -222,6 +285,7 @@ class TestMultiUserTelegram:
 
     def test_get_client_creates_per_user(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {}
         adapter.api_id = 123
@@ -242,6 +306,7 @@ class TestMultiUserTelegram:
 
     def test_get_client_reuses_existing(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {}
         adapter.api_id = 123
@@ -259,6 +324,7 @@ class TestMultiUserTelegram:
 
     def test_handle_extracts_user_id(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {}
         adapter.api_id = 123
@@ -268,11 +334,18 @@ class TestMultiUserTelegram:
         mock_client = MagicMock()
         with patch("telegram_adapter.TelegramClient", return_value=mock_client, create=True):
             future_mock = MagicMock()
-            future_mock.result.return_value = [MagicMock(
-                id=1, name="Chat", unread_count=0, message=None,
-                date=None, entity=MagicMock(spec=[]),
-                archived=False, pinned=False,
-            )]
+            future_mock.result.return_value = [
+                MagicMock(
+                    id=1,
+                    name="Chat",
+                    unread_count=0,
+                    message=None,
+                    date=None,
+                    entity=MagicMock(spec=[]),
+                    archived=False,
+                    pinned=False,
+                )
+            ]
             with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
                 result = adapter.handle("get_dialogs", {"user_id": "test_user"})
                 assert "test_user" in adapter.clients
@@ -281,6 +354,7 @@ class TestMultiUserTelegram:
 
     def test_handle_defaults_user_id(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {}
         adapter.api_id = 123
@@ -298,6 +372,7 @@ class TestMultiUserTelegram:
 
     def test_auth_state_per_user(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter._auth_state = {}
         adapter._auth_state["denis"] = {"phone": "+7123", "hash": "abc"}
@@ -307,6 +382,7 @@ class TestMultiUserTelegram:
 
     def test_is_authorized_per_user(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {"alice": MagicMock()}
         adapter.api_id = 0
@@ -321,6 +397,7 @@ class TestMultiUserTelegram:
 
     def test_listener_init_fields(self):
         from telegram_adapter import TelegramAdapter
+
         with patch("telegram_adapter.TELETHON_AVAILABLE", True):
             adapter = TelegramAdapter(api_id=123, api_hash="abc")
         assert hasattr(adapter, "_last_notify")
@@ -330,6 +407,7 @@ class TestMultiUserTelegram:
 
     def test_backward_compat_single_client(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {"default": MagicMock()}
         adapter.client = None
@@ -345,6 +423,7 @@ class TestMultiUserTelegram:
 class TestTelegramListener:
     def _make_adapter(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {}
         adapter.loop = asyncio.new_event_loop()
@@ -389,6 +468,7 @@ class TestTelegramListener:
 
     def test_rate_limiting_blocks_rapid_calls(self):
         import time
+
         adapter = self._make_adapter()
         adapter._last_notify["u1"] = time.time()
         now = time.time()
@@ -397,6 +477,7 @@ class TestTelegramListener:
 
     def test_rate_limiting_allows_after_interval(self):
         import time
+
         adapter = self._make_adapter()
         adapter._last_notify["u1"] = time.time() - 20
         now = time.time()
@@ -422,6 +503,7 @@ class TestTelegramListener:
 class TestTelegramAuth:
     def _make_adapter(self):
         from telegram_adapter import TelegramAdapter
+
         adapter = TelegramAdapter.__new__(TelegramAdapter)
         adapter.clients = {"default": MagicMock()}
         adapter.client = None
@@ -455,6 +537,7 @@ class TestTelegramAuth:
 
     def test_handle_auth_key_unregistered_returns_401(self):
         from telethon.errors import AuthKeyUnregisteredError
+
         adapter = self._make_adapter()
         adapter._run_sync = MagicMock(side_effect=AuthKeyUnregisteredError())
         result = adapter.handle("get_dialogs", {})
@@ -464,6 +547,7 @@ class TestTelegramAuth:
 
     def test_auth_start_flood_wait(self):
         from telethon.errors import FloodWaitError
+
         adapter = self._make_adapter()
         adapter._run_sync = MagicMock(side_effect=FloodWaitError(seconds=120))
         result = adapter.handle("auth_start", {"phone": "+71234567890"})
@@ -473,6 +557,7 @@ class TestTelegramAuth:
 
     def test_auth_code_invalid_code(self):
         from telethon.errors import PhoneCodeInvalidError
+
         adapter = self._make_adapter()
         adapter._auth_state = {"default": {"phone": "+7", "hash": "abc"}}
         adapter._run_sync = MagicMock(side_effect=PhoneCodeInvalidError())
@@ -482,6 +567,7 @@ class TestTelegramAuth:
 
     def test_auth_code_2fa_required(self):
         from telethon.errors import SessionPasswordNeededError
+
         adapter = self._make_adapter()
         adapter._auth_state = {"default": {"phone": "+7", "hash": "abc"}}
         adapter._run_sync = MagicMock(side_effect=SessionPasswordNeededError())

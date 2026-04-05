@@ -4,7 +4,7 @@ from css import login_css
 
 
 def login_page(error: str = "") -> str:
-    return """<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -18,7 +18,7 @@ def login_page(error: str = "") -> str:
 *, *::before, *::after {{ box-sizing:border-box; margin:0; padding:0; }}
 html {{ background:var(--bg-base); color:var(--text-main); height:100%; }}
 body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Arial,sans-serif; height:100%; }}
-{css}
+{login_css()}
 </style>
 </head>
 <body>
@@ -107,7 +107,7 @@ function authCode() {{
 }}
 </script>
 </body>
-</html>""".format(css=login_css())
+</html>"""
 
 
 HTML_TAB_BAR = """<div class="tab-bar">

@@ -1,6 +1,4 @@
 import os
-import sys
-import importlib
 
 pytest = __import__("pytest")
 _root = os.path.dirname(os.path.dirname(__file__))
@@ -31,6 +29,7 @@ class TestCryptoReal:
 
     def test_tampered_ciphertext_raises(self):
         import base64
+
         key = derive_key("key")
         encrypted = encrypt(key, "data")
         raw = bytearray(base64.b64decode(encrypted))

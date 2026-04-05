@@ -24,7 +24,7 @@ CSS = """/* === Reset & Base === */
   --footer-height: 28px;
 }
 
-html { 
+html {
   font-size: 16px;
   background: var(--bg);
   color: var(--text);
@@ -446,10 +446,10 @@ footer .channel { color: var(--text-dim); }
   :root {
     --content-width: 100%;
   }
-  
+
   .reader-body { font-size: 16px; }
   .reader-meta h1 { font-size: 22px; }
-  
+
   main { padding: 16px 12px 32px; }
 }
 

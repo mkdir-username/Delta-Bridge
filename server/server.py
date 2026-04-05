@@ -1,4 +1,5 @@
 """IoE Server v2: folder-based, steganographic, AES-256-GCM."""
+
 from __future__ import annotations
 import os
 import sys
@@ -18,10 +19,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import truststore
+
 truststore.inject_into_ssl()
 
 from imapclient import IMAPClient
@@ -31,19 +33,30 @@ from PIL import Image
 import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from ioe_crypto import derive_key, encrypt, decrypt, compress_encrypt, decrypt_decompress
+from ioe_crypto import (
+    derive_key,
+    encrypt,
+    decrypt,
+    compress_encrypt,
+    decrypt_decompress,
+)
 
 try:
     from browser_handler import handle_browser_request
+
     BROWSER_AVAILABLE = True
 except ImportError:
     BROWSER_AVAILABLE = False
+
     def handle_browser_request(request: dict[str, Any]) -> dict[str, Any]:
         return {"status": 503, "error": "browser handler not available"}
 
+
 try:
     from telegram_adapter import TelegramAdapter
+
     _tg_adapter = None
+
     def _get_telegram_adapter() -> Any:
         global _tg_adapter
         if _tg_adapter is None:
@@ -52,11 +65,14 @@ try:
         return _tg_adapter
 except ImportError:
     _tg_adapter = None
+
     def _get_telegram_adapter() -> Any:
         return None
 
+
 try:
     from claude_chat import ClaudeChat
+
     _claude_chat = ClaudeChat()
 except ImportError:
     _claude_chat = None
@@ -87,6 +103,7 @@ def _start_telegram_listener(adapter: Any, user_id: str) -> None:
     _tg_listeners_started.add(user_id)
     adapter.start_listener(user_id, _send_tg_notification)
 
+
 EMAIL = os.environ["EMAIL"]
 PASSWORD = os.environ["IMAP_PASSWORD"]
 IOE_KEY = derive_key(os.environ["IOE_SECRET"])
@@ -98,45 +115,106 @@ MAX_BODY = 50_000
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
 
 SUBJECTS = [
-    "Отчёт за неделю", "Re: Протокол совещания", "ТЗ на доработку",
-    "Коммерческое предложение", "Fw: Акт выполненных работ",
-    "Re: Согласование бюджета", "Счёт на оплату", "Fw: Заявка на отпуск",
-    "Служебная записка", "Re: План на квартал", "Табель учёта",
-    "Fw: Приказ", "Заключение", "Re: Реестр документов",
-    "Fw: Справка", "Протокол", "Re: Командировочное удостоверение",
-    "Фото с дня рождения", "Re: Рецепт шарлотки", "Билеты на поезд",
-    "Fw: Фотографии из отпуска", "Расписание тренировок",
-    "Re: Адреса гостиниц", "Список покупок",
-    "Заказ подтверждён", "Fw: Чек об оплате", "Статус доставки",
-    "Re: Бронирование отеля", "Электронный билет",
-    "Fw: Возврат товара", "Re: Трек-номер посылки", "Гарантийный талон",
-    "Подтверждение регистрации", "Напоминание о записи",
-    "Re: Уведомление", "Fw: Подтверждение оплаты",
-    "Напоминание о встрече", "Re: Смена пароля",
-    "Fw: Код подтверждения", "Уведомление о начислении",
-    "Re: Квитанция", "Fw: Выписка по счёту",
-    "Акт сверки", "Re: Дополнительное соглашение",
-    "Fw: Техническое задание", "Накладная",
-    "Re: График дежурств", "Fw: Инструкция",
-    "Резюме", "Re: Приглашение на собеседование",
-    "Fw: Результаты аттестации", "Расчётный лист",
+    "Отчёт за неделю",
+    "Re: Протокол совещания",
+    "ТЗ на доработку",
+    "Коммерческое предложение",
+    "Fw: Акт выполненных работ",
+    "Re: Согласование бюджета",
+    "Счёт на оплату",
+    "Fw: Заявка на отпуск",
+    "Служебная записка",
+    "Re: План на квартал",
+    "Табель учёта",
+    "Fw: Приказ",
+    "Заключение",
+    "Re: Реестр документов",
+    "Fw: Справка",
+    "Протокол",
+    "Re: Командировочное удостоверение",
+    "Фото с дня рождения",
+    "Re: Рецепт шарлотки",
+    "Билеты на поезд",
+    "Fw: Фотографии из отпуска",
+    "Расписание тренировок",
+    "Re: Адреса гостиниц",
+    "Список покупок",
+    "Заказ подтверждён",
+    "Fw: Чек об оплате",
+    "Статус доставки",
+    "Re: Бронирование отеля",
+    "Электронный билет",
+    "Fw: Возврат товара",
+    "Re: Трек-номер посылки",
+    "Гарантийный талон",
+    "Подтверждение регистрации",
+    "Напоминание о записи",
+    "Re: Уведомление",
+    "Fw: Подтверждение оплаты",
+    "Напоминание о встрече",
+    "Re: Смена пароля",
+    "Fw: Код подтверждения",
+    "Уведомление о начислении",
+    "Re: Квитанция",
+    "Fw: Выписка по счёту",
+    "Акт сверки",
+    "Re: Дополнительное соглашение",
+    "Fw: Техническое задание",
+    "Накладная",
+    "Re: График дежурств",
+    "Fw: Инструкция",
+    "Резюме",
+    "Re: Приглашение на собеседование",
+    "Fw: Результаты аттестации",
+    "Расчётный лист",
 ]
 FILENAMES = [
-    "scan_001.pdf", "receipt.pdf", "document.pdf", "invoice.pdf",
-    "report.pdf", "contract.pdf", "act.pdf", "photo.pdf",
-    "statement.pdf", "form.pdf", "application.pdf", "letter.pdf",
-    "schedule.pdf", "ticket.pdf", "confirmation.pdf", "order.pdf",
-    "memo.pdf", "summary.pdf", "certificate.pdf", "reference.pdf",
+    "scan_001.pdf",
+    "receipt.pdf",
+    "document.pdf",
+    "invoice.pdf",
+    "report.pdf",
+    "contract.pdf",
+    "act.pdf",
+    "photo.pdf",
+    "statement.pdf",
+    "form.pdf",
+    "application.pdf",
+    "letter.pdf",
+    "schedule.pdf",
+    "ticket.pdf",
+    "confirmation.pdf",
+    "order.pdf",
+    "memo.pdf",
+    "summary.pdf",
+    "certificate.pdf",
+    "reference.pdf",
 ]
 BODIES = [
-    "", "см. вложение", "Документ во вложении", "Пересылаю",
-    "Как договаривались", "Подтверждение", "Во вложении",
-    "Прошу ознакомиться", "К сведению", "Высылаю",
-    "В приложении файл", "Документ", "Направляю",
-    "По вашему запросу", "Для согласования",
+    "",
+    "см. вложение",
+    "Документ во вложении",
+    "Пересылаю",
+    "Как договаривались",
+    "Подтверждение",
+    "Во вложении",
+    "Прошу ознакомиться",
+    "К сведению",
+    "Высылаю",
+    "В приложении файл",
+    "Документ",
+    "Направляю",
+    "По вашему запросу",
+    "Для согласования",
 ]
 
-BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254", "metadata.google.internal"}
+BLOCKED_HOSTS = {
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "169.254.169.254",
+    "metadata.google.internal",
+}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 RATE_LIMIT = 10
 RATE_WINDOW = 60
@@ -194,8 +272,7 @@ def make_envelope(encrypted_bytes: bytes) -> MIMEMultipart:
     part = MIMEBase("application", "pdf")
     part.set_payload(encrypted_bytes)
     encoders.encode_base64(part)
-    part.add_header("Content-Disposition", "attachment",
-                    filename=random.choice(FILENAMES))
+    part.add_header("Content-Disposition", "attachment", filename=random.choice(FILENAMES))
     msg.attach(part)
     return msg
 
@@ -227,19 +304,19 @@ MIN_EXTRACT_LEN = 200
 
 
 def detect_type(url: str, html: str) -> str:
-    if _re.search(r'/article|/post|/blog|/news/\d', url):
-        return 'article'
-    if _re.search(r'/feed|/hub|/flows|/all$|/top$', url):
-        return 'feed'
-    if _re.search(r'/search|[?&]q=', url):
-        return 'search'
-    soup = BeautifulSoup(html, 'html.parser')
-    articles = soup.find_all('article')
+    if _re.search(r"/article|/post|/blog|/news/\d", url):
+        return "article"
+    if _re.search(r"/feed|/hub|/flows|/all$|/top$", url):
+        return "feed"
+    if _re.search(r"/search|[?&]q=", url):
+        return "search"
+    soup = BeautifulSoup(html, "html.parser")
+    articles = soup.find_all("article")
     if len(articles) > 3:
-        return 'feed'
+        return "feed"
     if len(articles) == 1:
-        return 'article'
-    return 'page'
+        return "article"
+    return "page"
 
 
 _page_cache: dict[str, dict[str, Any]] = {}
@@ -247,7 +324,7 @@ PAGE_CACHE_MAX = 100
 
 
 def smart_extract(url: str) -> dict[str, Any]:
-    cache_key = url.split('?')[0]
+    cache_key = url.split("?")[0]
     if cache_key in _page_cache:
         log.info("cache HIT: %s", url)
         return _page_cache[cache_key]
@@ -269,31 +346,55 @@ def _smart_extract_impl(url: str) -> dict[str, Any]:
     page_type = detect_type(url, raw_html)
 
     # Feed pages: skip trafilatura (extracts only 1 article), use soup directly
-    if page_type == 'feed':
+    if page_type == "feed":
         log.info("feed page detected, using soup directly")
-        soup = BeautifulSoup(raw_html, 'html.parser')
+        soup = BeautifulSoup(raw_html, "html.parser")
         title = soup.title.string if soup.title else ""
-        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe",
-                         "form", "input", "select", "fieldset", "legend", "label", "button"]):
+        for tag in soup(
+            [
+                "script",
+                "style",
+                "nav",
+                "footer",
+                "header",
+                "aside",
+                "iframe",
+                "form",
+                "input",
+                "select",
+                "fieldset",
+                "legend",
+                "label",
+                "button",
+            ]
+        ):
             tag.decompose()
         for a in soup.find_all("a", href=True):
             if not isinstance(a, Tag):
                 continue
             href = str(a["href"])
             if href.startswith("/"):
-                a["href"] = "{}://{}{}".format(parsed_url.scheme, parsed_url.netloc, href)
+                a["href"] = f"{parsed_url.scheme}://{parsed_url.netloc}{href}"
         body = soup.find("body") or soup
         html_content = str(body)
         return {
-            "format": "html", "type": page_type,
-            "title": title or "", "body": html_content, "domain": domain,
-            "word_count": len(BeautifulSoup(html_content, 'html.parser').get_text().split()),
+            "format": "html",
+            "type": page_type,
+            "title": title or "",
+            "body": html_content,
+            "domain": domain,
+            "word_count": len(BeautifulSoup(html_content, "html.parser").get_text().split()),
         }
 
     # Tier 1: trafilatura markdown
-    md = trafilatura.extract(raw_html, output_format='markdown',
-                            include_links=True, include_images=True,
-                            include_tables=True, url=url)
+    md = trafilatura.extract(
+        raw_html,
+        output_format="markdown",
+        include_links=True,
+        include_images=True,
+        include_tables=True,
+        url=url,
+    )
     if md and len(md) > MIN_EXTRACT_LEN:
         title = ""
         for line in md.split("\n"):
@@ -301,43 +402,73 @@ def _smart_extract_impl(url: str) -> dict[str, Any]:
                 title = line[2:].strip()
                 break
         return {
-            "format": "markdown", "type": page_type,
-            "title": title, "body": md, "domain": domain,
+            "format": "markdown",
+            "type": page_type,
+            "title": title,
+            "body": md,
+            "domain": domain,
             "word_count": len(md.split()),
         }
 
     # Tier 2: trafilatura with favor_recall
-    md = trafilatura.extract(raw_html, output_format='markdown',
-                            include_links=True, include_images=True,
-                            favor_recall=True, url=url)
+    md = trafilatura.extract(
+        raw_html,
+        output_format="markdown",
+        include_links=True,
+        include_images=True,
+        favor_recall=True,
+        url=url,
+    )
     if md and len(md) > MIN_EXTRACT_LEN:
         title = md.split("\n")[0].lstrip("# ").strip()[:100]
         return {
-            "format": "markdown", "type": page_type,
-            "title": title, "body": md, "domain": domain,
+            "format": "markdown",
+            "type": page_type,
+            "title": title,
+            "body": md,
+            "domain": domain,
             "word_count": len(md.split()),
         }
 
     log.info("trafilatura insufficient (%d chars), soup fallback", len(md or ""))
 
     # Tier 3: soup cleanup
-    soup = BeautifulSoup(raw_html, 'html.parser')
+    soup = BeautifulSoup(raw_html, "html.parser")
     title = soup.title.string if soup.title else ""
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe",
-                     "form", "input", "select", "fieldset", "legend", "label", "button"]):
+    for tag in soup(
+        [
+            "script",
+            "style",
+            "nav",
+            "footer",
+            "header",
+            "aside",
+            "iframe",
+            "form",
+            "input",
+            "select",
+            "fieldset",
+            "legend",
+            "label",
+            "button",
+        ]
+    ):
         tag.decompose()
     for a in soup.find_all("a", href=True):
         if not isinstance(a, Tag):
             continue
         href = str(a["href"])
         if href.startswith("/"):
-            a["href"] = "{}://{}{}".format(parsed_url.scheme, parsed_url.netloc, href)
+            a["href"] = f"{parsed_url.scheme}://{parsed_url.netloc}{href}"
     body = soup.find("body") or soup
     html_content = str(body)
     return {
-        "format": "html", "type": page_type,
-        "title": title or "", "body": html_content, "domain": domain,
-        "word_count": len(BeautifulSoup(html_content, 'html.parser').get_text().split()),
+        "format": "html",
+        "type": page_type,
+        "title": title or "",
+        "body": html_content,
+        "domain": domain,
+        "word_count": len(BeautifulSoup(html_content, "html.parser").get_text().split()),
     }
 
 
@@ -403,14 +534,18 @@ def do_search(query: str) -> list[dict[str, str]]:
             from duckduckgo_search import DDGS
         results = DDGS().text(query, max_results=10)
         return [
-            {"title": r.get("title", ""), "href": r.get("href", ""), "snippet": r.get("body", "")}
+            {
+                "title": r.get("title", ""),
+                "href": r.get("href", ""),
+                "snippet": r.get("body", ""),
+            }
             for r in results
         ]
     except Exception as e:
         return [{"title": "Search error", "href": "", "snippet": str(e)}]
 
 
-def extract_attachment(raw: bytes) -> Optional[bytes]:
+def extract_attachment(raw: bytes) -> bytes | None:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
         if part.get_content_disposition() == "attachment":
@@ -431,8 +566,8 @@ def handle_http_proxy(request: dict[str, Any]) -> dict[str, Any]:
     method = request.get("method", "GET").upper()
     url = request.get("url", "")
     headers = request.get("headers", {})
-    cookies = request.get("cookies", None)
-    body = request.get("body", None)
+    cookies = request.get("cookies")
+    body = request.get("body")
     content_type = request.get("content_type", "json")
     session_id = request.get("session_id")
 
@@ -446,8 +581,12 @@ def handle_http_proxy(request: dict[str, Any]) -> dict[str, Any]:
         _cleanup_sessions()
 
         req_headers = {**{"User-Agent": UA}, **headers}
-        kwargs = {"headers": req_headers, "cookies": cookies, "timeout": FETCH_TIMEOUT,
-                  "allow_redirects": False}
+        kwargs = {
+            "headers": req_headers,
+            "cookies": cookies,
+            "timeout": FETCH_TIMEOUT,
+            "allow_redirects": False,
+        }
 
         if body and method in ("POST", "PUT", "PATCH"):
             if content_type == "form":
@@ -468,11 +607,17 @@ def handle_http_proxy(request: dict[str, Any]) -> dict[str, Any]:
             if not location:
                 break
             from urllib.parse import urljoin
+
             location = urljoin(str(resp.url), location)
             validate_url(location)
-            resp = requester.request("GET", location, headers=req_headers,
-                                     cookies=cookies, timeout=FETCH_TIMEOUT,
-                                     allow_redirects=False)
+            resp = requester.request(
+                "GET",
+                location,
+                headers=req_headers,
+                cookies=cookies,
+                timeout=FETCH_TIMEOUT,
+                allow_redirects=False,
+            )
             redirect_count += 1
 
         result = {
@@ -500,7 +645,8 @@ def handle_http_proxy(request: dict[str, Any]) -> dict[str, Any]:
 CLAUDE_PROXY_TIMEOUT = 300
 CLAUDE_DEFAULT_HOST = "api.anthropic.com"
 
-_claude_session: Optional[requests.Session] = None
+_claude_session: requests.Session | None = None
+
 
 def _get_claude_session() -> requests.Session:
     global _claude_session
@@ -519,12 +665,16 @@ def handle_claude_proxy(request: dict[str, Any]) -> dict[str, Any]:
     host = headers.get("host", CLAUDE_DEFAULT_HOST)
     if host in ("localhost", "127.0.0.1") or host.startswith("localhost:"):
         host = CLAUDE_DEFAULT_HOST
-    url = "https://{}{}".format(host, path)
+    url = f"https://{host}{path}"
 
     req_headers = {k: v for k, v in headers.items() if k.lower() != "host"}
 
     try:
-        kwargs = {"headers": req_headers, "timeout": CLAUDE_PROXY_TIMEOUT, "allow_redirects": True}
+        kwargs = {
+            "headers": req_headers,
+            "timeout": CLAUDE_PROXY_TIMEOUT,
+            "allow_redirects": True,
+        }
         if body and method in ("POST", "PUT", "PATCH"):
             kwargs["data"] = body.encode("utf-8") if isinstance(body, str) else body
         resp = _get_claude_session().request(method, url, **kwargs)
@@ -537,9 +687,19 @@ def handle_claude_proxy(request: dict[str, Any]) -> dict[str, Any]:
             },
         }
     except (requests.Timeout, TimeoutError):
-        return {"type": "claude_proxy_response", "http_response": {"status_code": 504, "headers": {}, "body": "upstream timeout"}}
+        return {
+            "type": "claude_proxy_response",
+            "http_response": {
+                "status_code": 504,
+                "headers": {},
+                "body": "upstream timeout",
+            },
+        }
     except Exception as e:
-        return {"type": "claude_proxy_response", "http_response": {"status_code": 502, "headers": {}, "body": str(e)}}
+        return {
+            "type": "claude_proxy_response",
+            "http_response": {"status_code": 502, "headers": {}, "body": str(e)},
+        }
 
 
 def handle_claude_chat(request: dict[str, Any]) -> dict[str, Any]:
@@ -556,10 +716,10 @@ def handle_claude_chat(request: dict[str, Any]) -> dict[str, Any]:
     elif action == "new_conversation":
         result = _claude_chat.new_conversation(user_id)
         return result
-    return {"status": 400, "error": "unknown action: {}".format(action)}
+    return {"status": 400, "error": f"unknown action: {action}"}
 
 
-def dispatch_request(request: dict[str, Any]) -> Optional[dict[str, Any]]:
+def dispatch_request(request: dict[str, Any]) -> dict[str, Any] | None:
     req_type = request.get("type")
     if req_type is None:
         return None
@@ -577,7 +737,11 @@ def dispatch_request(request: dict[str, Any]) -> Optional[dict[str, Any]]:
         if service == "telegram":
             adapter = _get_telegram_adapter()
             if adapter is None:
-                return {"status": 503, "error": "telegram not available (telethon not installed)", "user_id": user_id}
+                return {
+                    "status": 503,
+                    "error": "telegram not available (telethon not installed)",
+                    "user_id": user_id,
+                }
             action = request.get("action", "")
             adapter_result: dict[str, Any] = adapter.handle(action, request)
             adapter_result["user_id"] = user_id
@@ -585,7 +749,11 @@ def dispatch_request(request: dict[str, Any]) -> Optional[dict[str, Any]]:
             if action == "auth_code" and result.get("auth_status") == "authorized":
                 _start_telegram_listener(adapter, user_id)
             return result
-        return {"status": 400, "error": f"unknown service: {service}", "user_id": user_id}
+        return {
+            "status": 400,
+            "error": f"unknown service: {service}",
+            "user_id": user_id,
+        }
     if req_type == "claude_chat":
         result = handle_claude_chat(request)
         result["user_id"] = user_id
@@ -658,7 +826,10 @@ def process_message(client: Any, uid: int, raw: bytes) -> bool:
         if cmd == "SEARCH":
             query = request.get("query", "")
             results = do_search(query)
-            append_response(client, {"id": req_id, "status": 200, "results": results, "user_id": user_id})
+            append_response(
+                client,
+                {"id": req_id, "status": 200, "results": results, "user_id": user_id},
+            )
         elif cmd == "TEXT":
             url = request.get("url", "")
             text = fetch_text(url)
@@ -671,28 +842,49 @@ def process_message(client: Any, uid: int, raw: bytes) -> bool:
             for fname in ["client.py", "crypto.py", "ioe_web.py"]:
                 fpath = os.path.join(base_dir, fname)
                 if os.path.exists(fpath):
-                    with open(fpath, "r") as f:
+                    with open(fpath) as f:
                         files[fname] = f.read()
-            append_response(client, {
-                "id": req_id, "status": 200, "cmd": "UPDATE", "files": files,
-                "user_id": user_id,
-            })
+            append_response(
+                client,
+                {
+                    "id": req_id,
+                    "status": 200,
+                    "cmd": "UPDATE",
+                    "files": files,
+                    "user_id": user_id,
+                },
+            )
         else:
             url = request.get("url", "")
             result = smart_extract(url)
             body = result["body"]
             if len(body) > MAX_BODY:
                 body = body[:MAX_BODY]
-            append_response(client, {
-                "id": req_id, "status": 200,
-                "title": result["title"], "body": body,
-                "format": result["format"], "type": result["type"],
-                "domain": result["domain"], "word_count": result["word_count"],
-                "user_id": user_id,
-            })
+            append_response(
+                client,
+                {
+                    "id": req_id,
+                    "status": 200,
+                    "title": result["title"],
+                    "body": body,
+                    "format": result["format"],
+                    "type": result["type"],
+                    "domain": result["domain"],
+                    "word_count": result["word_count"],
+                    "user_id": user_id,
+                },
+            )
         log.info("Done uid=%s", uid)
     except Exception as e:
-        append_response(client, {"id": req_id, "status": 500, "error": type(e).__name__, "user_id": user_id})
+        append_response(
+            client,
+            {
+                "id": req_id,
+                "status": 500,
+                "error": type(e).__name__,
+                "user_id": user_id,
+            },
+        )
         log.error("Failed uid=%s: %s: %s", uid, type(e).__name__, e)
 
     _processed_uids.add(uid)
@@ -736,7 +928,11 @@ def main() -> None:
                     client.noop()
                     messages = client.search(["ALL"])
                     if messages:
-                        log.info("mainloop: search found %d uids: %s", len(messages), messages[:10])
+                        log.info(
+                            "mainloop: search found %d uids: %s",
+                            len(messages),
+                            messages[:10],
+                        )
                     for uid in messages:
                         data = client.fetch([uid], ["RFC822"])
                         raw = data[uid][b"RFC822"]

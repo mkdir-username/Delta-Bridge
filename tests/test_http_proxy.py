@@ -1,5 +1,5 @@
 """Tests for HTTP proxy layer (Tasks 2-6)."""
-import json
+
 import sys
 import os
 import types
@@ -9,32 +9,50 @@ _root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_root, "server"))
 sys.path.insert(0, os.path.dirname(__file__))
 
-for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests", "trafilatura"]:
+for _mod in [
+    "truststore",
+    "imapclient",
+    "readability",
+    "PIL",
+    "PIL.Image",
+    "requests",
+    "trafilatura",
+]:
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
 sys.modules["truststore"].inject_into_ssl = lambda: None
 sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 
+
 class _MockDoc:
     def __init__(self, html=""):
         pass
+
     def title(self):
         return "Mock Title"
+
     def summary(self):
         return "<p>Mock</p>"
+
 
 sys.modules["readability"].Document = _MockDoc
 sys.modules["PIL.Image"] = sys.modules["PIL"]
 sys.modules["PIL"].Image = sys.modules["PIL"]
 sys.modules["requests"].get = lambda *a, **kw: None
 sys.modules["requests"].request = lambda *a, **kw: None
-sys.modules["requests"].Session = type("Session", (), {
-    "request": lambda *a, **kw: None,
-    "close": lambda self: None,
-})
+sys.modules["requests"].Session = type(
+    "Session",
+    (),
+    {
+        "request": lambda *a, **kw: None,
+        "close": lambda self: None,
+    },
+)
+
 
 def _mock_trafilatura_extract(html, **kw):
     return None
+
 
 sys.modules["trafilatura"].extract = _mock_trafilatura_extract
 
@@ -48,7 +66,6 @@ import server as srv
 
 
 class TestProtocolRouting(unittest.TestCase):
-
     def test_http_type_routes_to_handle_http_proxy(self):
         with patch.object(srv, "handle_http_proxy", return_value={"status_code": 200}) as mock_h:
             result = srv.dispatch_request({"type": "http", "url": "https://example.com", "method": "GET"})
@@ -81,7 +98,6 @@ class TestProtocolRouting(unittest.TestCase):
 
 
 class TestHttpProxyGet(unittest.TestCase):
-
     @patch("server.requests.request")
     @patch("server.check_rate_limit")
     @patch("server.validate_url")
@@ -134,7 +150,6 @@ class TestHttpProxyGet(unittest.TestCase):
 
 
 class TestHttpProxyPost(unittest.TestCase):
-
     @patch("server.requests.request")
     @patch("server.check_rate_limit")
     @patch("server.validate_url")
@@ -146,10 +161,14 @@ class TestHttpProxyPost(unittest.TestCase):
         mock_resp.url = "https://api.example.com/items"
         mock_req.return_value = mock_resp
 
-        result = srv.handle_http_proxy({
-            "method": "POST", "url": "https://api.example.com/items",
-            "body": {"name": "test"}, "content_type": "json",
-        })
+        result = srv.handle_http_proxy(
+            {
+                "method": "POST",
+                "url": "https://api.example.com/items",
+                "body": {"name": "test"},
+                "content_type": "json",
+            }
+        )
         self.assertEqual(result["status_code"], 201)
         mock_req.assert_called_once()
         _, kwargs = mock_req.call_args
@@ -166,10 +185,14 @@ class TestHttpProxyPost(unittest.TestCase):
         mock_resp.url = "https://example.com/form"
         mock_req.return_value = mock_resp
 
-        result = srv.handle_http_proxy({
-            "method": "POST", "url": "https://example.com/form",
-            "body": "key=value", "content_type": "form",
-        })
+        result = srv.handle_http_proxy(
+            {
+                "method": "POST",
+                "url": "https://example.com/form",
+                "body": "key=value",
+                "content_type": "form",
+            }
+        )
         _, kwargs = mock_req.call_args
         self.assertEqual(kwargs["data"], "key=value")
 
@@ -184,10 +207,13 @@ class TestHttpProxyPost(unittest.TestCase):
         mock_resp.url = "https://example.com/item/1"
         mock_req.return_value = mock_resp
 
-        srv.handle_http_proxy({
-            "method": "PUT", "url": "https://example.com/item/1",
-            "body": {"name": "updated"},
-        })
+        srv.handle_http_proxy(
+            {
+                "method": "PUT",
+                "url": "https://example.com/item/1",
+                "body": {"name": "updated"},
+            }
+        )
         _, kwargs = mock_req.call_args
         self.assertEqual(kwargs["json"], {"name": "updated"})
 
@@ -209,7 +235,6 @@ class TestHttpProxyPost(unittest.TestCase):
 
 
 class TestContentPipeline(unittest.TestCase):
-
     @patch("server.smart_extract")
     @patch("server.requests.request")
     @patch("server.check_rate_limit")
@@ -222,8 +247,12 @@ class TestContentPipeline(unittest.TestCase):
         mock_resp.url = "https://example.com/page"
         mock_req.return_value = mock_resp
         mock_extract.return_value = {
-            "title": "Page", "body": "Hello", "format": "markdown",
-            "type": "article", "domain": "example.com", "word_count": 1,
+            "title": "Page",
+            "body": "Hello",
+            "format": "markdown",
+            "type": "article",
+            "domain": "example.com",
+            "word_count": 1,
         }
 
         result = srv.handle_http_proxy({"method": "GET", "url": "https://example.com/page"})
@@ -259,9 +288,13 @@ class TestContentPipeline(unittest.TestCase):
         mock_resp.url = "https://example.com"
         mock_req.return_value = mock_resp
 
-        result = srv.handle_http_proxy({
-            "method": "GET", "url": "https://example.com", "extract": False,
-        })
+        result = srv.handle_http_proxy(
+            {
+                "method": "GET",
+                "url": "https://example.com",
+                "extract": False,
+            }
+        )
         mock_extract.assert_not_called()
         self.assertNotIn("extracted", result)
 
@@ -283,7 +316,6 @@ class TestContentPipeline(unittest.TestCase):
 
 
 class TestSessions(unittest.TestCase):
-
     def setUp(self):
         srv._sessions.clear()
 
@@ -316,15 +348,22 @@ class TestSessions(unittest.TestCase):
         mock_session.request.return_value = mock_resp
         srv._sessions["s-http"] = {"session": mock_session, "created": time.time()}
 
-        result = srv.handle_http_proxy({
-            "method": "GET", "url": "https://example.com", "session_id": "s-http",
-        })
+        result = srv.handle_http_proxy(
+            {
+                "method": "GET",
+                "url": "https://example.com",
+                "session_id": "s-http",
+            }
+        )
         mock_session.request.assert_called_once()
         mock_req.assert_not_called()
         self.assertEqual(result["status_code"], 200)
 
     def test_cleanup_removes_expired(self):
-        srv._sessions["old"] = {"session": MagicMock(), "created": time.time() - srv.SESSION_TTL - 10}
+        srv._sessions["old"] = {
+            "session": MagicMock(),
+            "created": time.time() - srv.SESSION_TTL - 10,
+        }
         srv._sessions["new"] = {"session": MagicMock(), "created": time.time()}
         srv._cleanup_sessions()
         self.assertNotIn("old", srv._sessions)
@@ -332,7 +371,6 @@ class TestSessions(unittest.TestCase):
 
 
 class TestUserIdRouting(unittest.TestCase):
-
     def test_dispatch_session_start_includes_user_id_from_request(self):
         result = srv.dispatch_request({"type": "session_start", "user_id": "denis"})
         self.assertEqual(result["status"], 200)
@@ -350,7 +388,14 @@ class TestUserIdRouting(unittest.TestCase):
 
     def test_dispatch_http_preserves_user_id(self):
         with patch.object(srv, "handle_http_proxy", return_value={"status_code": 200}) as mock_h:
-            result = srv.dispatch_request({"type": "http", "url": "https://x.com", "method": "GET", "user_id": "bob"})
+            result = srv.dispatch_request(
+                {
+                    "type": "http",
+                    "url": "https://x.com",
+                    "method": "GET",
+                    "user_id": "bob",
+                }
+            )
             self.assertEqual(result.get("user_id"), "bob")
 
     def test_dispatch_session_end_preserves_user_id(self):

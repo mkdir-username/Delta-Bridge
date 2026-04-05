@@ -1,4 +1,5 @@
 """Local HTTP proxy that tunnels Claude Code CLI traffic through IoE IMAP transport."""
+
 from __future__ import annotations
 import json
 import os
@@ -38,19 +39,38 @@ PROXY_PORT: int = int(os.environ.get("IOE_CLAUDE_PORT", "8090"))
 POLL_CYCLES: int = 300
 
 SUBJECTS: list[str] = [
-    "Re: Протокол совещания", "Отчёт за неделю", "ТЗ на доработку",
-    "Коммерческое предложение", "Fw: Акт выполненных работ",
-    "Re: Согласование бюджета", "Счёт на оплату", "Fw: Заявка на отпуск",
-    "Фото с дня рождения", "Re: Рецепт шарлотки", "Билеты на поезд",
-    "Заказ подтверждён", "Fw: Чек об оплате", "Статус доставки",
+    "Re: Протокол совещания",
+    "Отчёт за неделю",
+    "ТЗ на доработку",
+    "Коммерческое предложение",
+    "Fw: Акт выполненных работ",
+    "Re: Согласование бюджета",
+    "Счёт на оплату",
+    "Fw: Заявка на отпуск",
+    "Фото с дня рождения",
+    "Re: Рецепт шарлотки",
+    "Билеты на поезд",
+    "Заказ подтверждён",
+    "Fw: Чек об оплате",
+    "Статус доставки",
 ]
 FILENAMES: list[str] = [
-    "scan_001.pdf", "receipt.pdf", "document.pdf", "invoice.pdf",
-    "report.pdf", "contract.pdf", "act.pdf", "statement.pdf",
+    "scan_001.pdf",
+    "receipt.pdf",
+    "document.pdf",
+    "invoice.pdf",
+    "report.pdf",
+    "contract.pdf",
+    "act.pdf",
+    "statement.pdf",
 ]
 BODIES: list[str] = [
-    "см. вложение", "Документ во вложении", "Пересылаю",
-    "Как договаривались", "Подтверждение", "Во вложении",
+    "см. вложение",
+    "Документ во вложении",
+    "Пересылаю",
+    "Как договаривались",
+    "Подтверждение",
+    "Во вложении",
 ]
 
 
@@ -82,7 +102,7 @@ def _get_send_conn() -> imaplib.IMAP4_SSL:
 
 def _send_via_imap(payload_b64: bytes) -> None:
     msg = MIMEMultipart()
-    msg["Subject"] = "{} {}".format(random.choice(SUBJECTS), uuid.uuid4().hex[:8])
+    msg["Subject"] = f"{random.choice(SUBJECTS)} {uuid.uuid4().hex[:8]}"
     msg["From"] = EMAIL
     msg["To"] = EMAIL
     msg.attach(MIMEText(random.choice(BODIES), "plain", "utf-8"))
@@ -302,6 +322,7 @@ if __name__ == "__main__":
     try:
         from dotenv import load_dotenv
     except ImportError:
+
         def load_dotenv(path: Any) -> None:  # type: ignore[misc]  # fallback redefines import
             with open(path) as f:
                 for line in f:
@@ -309,6 +330,7 @@ if __name__ == "__main__":
                     if line and not line.startswith("#") and "=" in line:
                         k, v = line.split("=", 1)
                         os.environ.setdefault(k.strip(), v.strip())
+
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
     if os.path.exists(env_path):
         load_dotenv(env_path)

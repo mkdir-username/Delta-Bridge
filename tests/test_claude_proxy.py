@@ -1,4 +1,5 @@
 """Tests for Claude-over-IoE proxy: crypto helpers, serialization, handler."""
+
 import json
 import sys
 import os
@@ -9,19 +10,31 @@ sys.path.insert(0, os.path.join(_root, "server"))
 sys.path.insert(0, os.path.join(_root, "client"))
 sys.path.insert(0, os.path.dirname(__file__))
 
-for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image", "requests", "trafilatura"]:
+for _mod in [
+    "truststore",
+    "imapclient",
+    "readability",
+    "PIL",
+    "PIL.Image",
+    "requests",
+    "trafilatura",
+]:
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
 sys.modules["truststore"].inject_into_ssl = lambda: None
 sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 
+
 class _MockDoc:
     def __init__(self, html=""):
         pass
+
     def title(self):
         return "Mock Title"
+
     def summary(self):
         return "<p>Mock</p>"
+
 
 sys.modules["readability"].Document = _MockDoc
 sys.modules["PIL.Image"] = sys.modules["PIL"]
@@ -37,17 +50,21 @@ _mock_resp = types.SimpleNamespace(
 
 sys.modules["requests"].get = lambda *a, **kw: _mock_resp
 sys.modules["requests"].request = lambda *a, **kw: _mock_resp
-sys.modules["requests"].Session = type("Session", (), {
-    "request": lambda *a, **kw: _mock_resp,
-    "close": lambda self: None,
-})
+sys.modules["requests"].Session = type(
+    "Session",
+    (),
+    {
+        "request": lambda *a, **kw: _mock_resp,
+        "close": lambda self: None,
+    },
+)
 sys.modules["requests"].Timeout = TimeoutError
 
 os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "test")
 os.environ.setdefault("IOE_SECRET", "test-secret-key")
 
-from ioe_crypto import derive_key, encrypt, decrypt, compress_encrypt, decrypt_decompress
+from ioe_crypto import derive_key, encrypt, compress_encrypt, decrypt_decompress
 import server as ioe_server
 
 ioe_server.requests = sys.modules["requests"]
@@ -85,15 +102,20 @@ class TestGzipCrypto:
 
 import pytest
 
+
 @pytest.fixture(autouse=True)
 def _patch_requests():
     old_request = ioe_server.requests.request
     old_session = ioe_server.requests.Session
     ioe_server.requests.request = lambda *a, **kw: _mock_resp
-    ioe_server.requests.Session = type("Session", (), {
-        "request": lambda *a, **kw: _mock_resp,
-        "close": lambda self: None,
-    })
+    ioe_server.requests.Session = type(
+        "Session",
+        (),
+        {
+            "request": lambda *a, **kw: _mock_resp,
+            "close": lambda self: None,
+        },
+    )
     ioe_server._claude_session = None
     yield
     ioe_server.requests.request = old_request
@@ -133,6 +155,7 @@ class TestHandleClaudeProxy:
                     data = data.decode("utf-8")
                 captured["body"] = data
                 return _mock_resp
+
             def close(self):
                 pass
 
@@ -143,7 +166,10 @@ class TestHandleClaudeProxy:
                 "http_request": {
                     "method": "POST",
                     "path": "/v1/messages",
-                    "headers": {"host": "api.anthropic.com", "content-type": "application/json"},
+                    "headers": {
+                        "host": "api.anthropic.com",
+                        "content-type": "application/json",
+                    },
                     "body": json.dumps({"model": "claude-opus-4-20250514", "stream": True}),
                 },
             }
@@ -160,6 +186,7 @@ class TestHandleClaudeProxy:
             def request(self, method, url, **kwargs):
                 captured["url"] = url
                 return _mock_resp
+
             def close(self):
                 pass
 
@@ -183,6 +210,7 @@ class TestHandleClaudeProxy:
         class TimeoutSession:
             def request(self, *a, **kw):
                 raise TimeoutError("timeout")
+
             def close(self):
                 pass
 
@@ -190,7 +218,12 @@ class TestHandleClaudeProxy:
         try:
             request = {
                 "type": "claude_proxy",
-                "http_request": {"method": "GET", "path": "/", "headers": {}, "body": None},
+                "http_request": {
+                    "method": "GET",
+                    "path": "/",
+                    "headers": {},
+                    "body": None,
+                },
             }
             result = ioe_server.handle_claude_proxy(request)
             assert result["http_response"]["status_code"] == 504
@@ -214,7 +247,6 @@ class TestHandleClaudeProxy:
         assert result["type"] == "claude_proxy_response"
         assert result["user_id"] == "claude"
 
-
     def test_session_reused_across_calls(self):
         call_count = {"n": 0}
         OrigSession = ioe_server.requests.Session
@@ -222,8 +254,10 @@ class TestHandleClaudeProxy:
         class CountingSession:
             def __init__(self):
                 call_count["n"] += 1
+
             def request(self, *a, **kw):
                 return _mock_resp
+
             def close(self):
                 pass
 
@@ -257,7 +291,12 @@ class TestSerialization:
                 "method": "POST",
                 "path": "/v1/messages",
                 "headers": {"authorization": "Bearer token"},
-                "body": json.dumps({"model": "claude-opus-4-20250514", "messages": [{"role": "user", "content": "hi"}]}),
+                "body": json.dumps(
+                    {
+                        "model": "claude-opus-4-20250514",
+                        "messages": [{"role": "user", "content": "hi"}],
+                    }
+                ),
             },
         }
         encrypted = compress_encrypt(key, json.dumps(request))

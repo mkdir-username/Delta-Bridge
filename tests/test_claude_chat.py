@@ -1,8 +1,6 @@
 import os
 import sys
 import json
-import types
-import pytest
 from unittest.mock import patch, MagicMock
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,18 +11,18 @@ class TestClaudeChatSendMessage:
     def test_send_message_returns_response(self):
         from claude_chat import ClaudeChat
 
-        fake_output = json.dumps({
-            "type": "result",
-            "result": "Hello! How can I help?",
-            "session_id": "sess-abc-123",
-            "total_cost_usd": 0.05,
-            "duration_ms": 2000,
-            "modelUsage": {"claude-sonnet-4-6": {"costUSD": 0.05}},
-        })
+        fake_output = json.dumps(
+            {
+                "type": "result",
+                "result": "Hello! How can I help?",
+                "session_id": "sess-abc-123",
+                "total_cost_usd": 0.05,
+                "duration_ms": 2000,
+                "modelUsage": {"claude-sonnet-4-6": {"costUSD": 0.05}},
+            }
+        )
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout=fake_output, stderr=""
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout=fake_output, stderr="")
             chat = ClaudeChat()
             result = chat.send_message("user1", "hello")
 
@@ -37,18 +35,18 @@ class TestClaudeChatSendMessage:
     def test_send_message_passes_resume_flag(self):
         from claude_chat import ClaudeChat
 
-        fake_output = json.dumps({
-            "type": "result",
-            "result": "yes",
-            "session_id": "sess-abc-123",
-            "total_cost_usd": 0.01,
-            "duration_ms": 500,
-            "modelUsage": {},
-        })
+        fake_output = json.dumps(
+            {
+                "type": "result",
+                "result": "yes",
+                "session_id": "sess-abc-123",
+                "total_cost_usd": 0.01,
+                "duration_ms": 500,
+                "modelUsage": {},
+            }
+        )
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout=fake_output, stderr=""
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout=fake_output, stderr="")
             chat = ClaudeChat()
             chat._sessions["user1"] = "prev-session-id"
             chat.send_message("user1", "continue")
@@ -82,9 +80,7 @@ class TestClaudeChatSendMessage:
         from claude_chat import ClaudeChat
 
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=1, stdout="", stderr="not authenticated"
-            )
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not authenticated")
             chat = ClaudeChat()
             result = chat.send_message("user1", "hello")
 
@@ -135,18 +131,18 @@ class TestClaudeChatSession:
     def test_session_persists_after_send(self):
         from claude_chat import ClaudeChat
 
-        fake_output = json.dumps({
-            "type": "result",
-            "result": "hi",
-            "session_id": "new-sess-456",
-            "total_cost_usd": 0.01,
-            "duration_ms": 100,
-            "modelUsage": {},
-        })
+        fake_output = json.dumps(
+            {
+                "type": "result",
+                "result": "hi",
+                "session_id": "new-sess-456",
+                "total_cost_usd": 0.01,
+                "duration_ms": 100,
+                "modelUsage": {},
+            }
+        )
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout=fake_output, stderr=""
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout=fake_output, stderr="")
             chat = ClaudeChat()
             chat.send_message("user1", "hello")
 

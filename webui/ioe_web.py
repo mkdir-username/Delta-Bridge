@@ -1,4 +1,5 @@
 """IoE WebUI: local web-based browser over IoE transport."""
+
 import os
 import sys
 import logging
@@ -9,6 +10,7 @@ from http.server import HTTPServer
 
 import sys as _sys
 import os as _os
+
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
 from ioe_crypto import derive_key
 
@@ -45,42 +47,97 @@ IMAP_HOST = "imap.yandex.ru"
 QUEUE_FOLDER = "IoE"
 
 SUBJECTS = [
-    "Отчёт за неделю", "Re: Протокол совещания", "ТЗ на доработку",
-    "Коммерческое предложение", "Fw: Акт выполненных работ",
-    "Re: Согласование бюджета", "Счёт на оплату", "Fw: Заявка на отпуск",
-    "Служебная записка", "Re: План на квартал", "Табель учёта",
-    "Fw: Приказ", "Заключение", "Re: Реестр документов",
-    "Fw: Справка", "Протокол", "Re: Командировочное удостоверение",
-    "Фото с дня рождения", "Re: Рецепт шарлотки", "Билеты на поезд",
-    "Fw: Фотографии из отпуска", "Расписание тренировок",
-    "Re: Адреса гостиниц", "Список покупок",
-    "Заказ подтверждён", "Fw: Чек об оплате", "Статус доставки",
-    "Re: Бронирование отеля", "Электронный билет",
-    "Fw: Возврат товара", "Re: Трек-номер посылки", "Гарантийный талон",
-    "Подтверждение регистрации", "Напоминание о записи",
-    "Re: Уведомление", "Fw: Подтверждение оплаты",
-    "Напоминание о встрече", "Re: Смена пароля",
-    "Fw: Код подтверждения", "Уведомление о начислении",
-    "Re: Квитанция", "Fw: Выписка по счёту",
-    "Акт сверки", "Re: Дополнительное соглашение",
-    "Fw: Техническое задание", "Накладная",
-    "Re: График дежурств", "Fw: Инструкция",
-    "Резюме", "Re: Приглашение на собеседование",
-    "Fw: Результаты аттестации", "Расчётный лист",
+    "Отчёт за неделю",
+    "Re: Протокол совещания",
+    "ТЗ на доработку",
+    "Коммерческое предложение",
+    "Fw: Акт выполненных работ",
+    "Re: Согласование бюджета",
+    "Счёт на оплату",
+    "Fw: Заявка на отпуск",
+    "Служебная записка",
+    "Re: План на квартал",
+    "Табель учёта",
+    "Fw: Приказ",
+    "Заключение",
+    "Re: Реестр документов",
+    "Fw: Справка",
+    "Протокол",
+    "Re: Командировочное удостоверение",
+    "Фото с дня рождения",
+    "Re: Рецепт шарлотки",
+    "Билеты на поезд",
+    "Fw: Фотографии из отпуска",
+    "Расписание тренировок",
+    "Re: Адреса гостиниц",
+    "Список покупок",
+    "Заказ подтверждён",
+    "Fw: Чек об оплате",
+    "Статус доставки",
+    "Re: Бронирование отеля",
+    "Электронный билет",
+    "Fw: Возврат товара",
+    "Re: Трек-номер посылки",
+    "Гарантийный талон",
+    "Подтверждение регистрации",
+    "Напоминание о записи",
+    "Re: Уведомление",
+    "Fw: Подтверждение оплаты",
+    "Напоминание о встрече",
+    "Re: Смена пароля",
+    "Fw: Код подтверждения",
+    "Уведомление о начислении",
+    "Re: Квитанция",
+    "Fw: Выписка по счёту",
+    "Акт сверки",
+    "Re: Дополнительное соглашение",
+    "Fw: Техническое задание",
+    "Накладная",
+    "Re: График дежурств",
+    "Fw: Инструкция",
+    "Резюме",
+    "Re: Приглашение на собеседование",
+    "Fw: Результаты аттестации",
+    "Расчётный лист",
 ]
 FILENAMES = [
-    "scan_001.pdf", "receipt.pdf", "document.pdf", "invoice.pdf",
-    "report.pdf", "contract.pdf", "act.pdf", "photo.pdf",
-    "statement.pdf", "form.pdf", "application.pdf", "letter.pdf",
-    "schedule.pdf", "ticket.pdf", "confirmation.pdf", "order.pdf",
-    "memo.pdf", "summary.pdf", "certificate.pdf", "reference.pdf",
+    "scan_001.pdf",
+    "receipt.pdf",
+    "document.pdf",
+    "invoice.pdf",
+    "report.pdf",
+    "contract.pdf",
+    "act.pdf",
+    "photo.pdf",
+    "statement.pdf",
+    "form.pdf",
+    "application.pdf",
+    "letter.pdf",
+    "schedule.pdf",
+    "ticket.pdf",
+    "confirmation.pdf",
+    "order.pdf",
+    "memo.pdf",
+    "summary.pdf",
+    "certificate.pdf",
+    "reference.pdf",
 ]
 BODIES = [
-    "", "см. вложение", "Документ во вложении", "Пересылаю",
-    "Как договаривались", "Подтверждение", "Во вложении",
-    "Прошу ознакомиться", "К сведению", "Высылаю",
-    "В приложении файл", "Документ", "Направляю",
-    "По вашему запросу", "Для согласования",
+    "",
+    "см. вложение",
+    "Документ во вложении",
+    "Пересылаю",
+    "Как договаривались",
+    "Подтверждение",
+    "Во вложении",
+    "Прошу ознакомиться",
+    "К сведению",
+    "Высылаю",
+    "В приложении файл",
+    "Документ",
+    "Направляю",
+    "По вашему запросу",
+    "Для согласования",
 ]
 
 DEMO_MODE = "--demo" in sys.argv
@@ -90,8 +147,10 @@ lock = threading.Lock()
 notification_queues = {}
 
 import hashlib as _hashlib
+
 _device_seed = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
-    os.environ.get("USER", ""), __import__("socket").gethostname())
+    os.environ.get("USER", ""), __import__("socket").gethostname()
+)
 DEVICE_ID = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
 
 seen_notification_uids = set()
@@ -153,6 +212,7 @@ def main() -> None:
             port = int(sys.argv[i + 1])
             break
     import auth
+
     auth.load_whitelist()
     auth.init_sessions()
     if not auth._whitelist:
@@ -164,8 +224,8 @@ def main() -> None:
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(("0.0.0.0", port), Handler)
     mode = " (demo)" if DEMO_MODE else ""
-    url = "http://localhost:{}".format(port)
-    print("IoE WebUI{}: {}".format(mode, url))
+    url = f"http://localhost:{port}"
+    print(f"IoE WebUI{mode}: {url}")
     threading.Timer(0.5, webbrowser.open, args=[url]).start()
     try:
         server.serve_forever()

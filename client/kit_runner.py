@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import json
 import re
@@ -15,11 +16,16 @@ class KitRunner:
             result: dict[str, Any] = json.load(f)
             return result
 
-    def run(self, kit: dict[str, Any], action_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        kit: dict[str, Any],
+        action_name: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self.variables.update(params or {})
         action = kit.get("actions", {}).get(action_name)
         if not action:
-            return {"error": "unknown action: {}".format(action_name)}
+            return {"error": f"unknown action: {action_name}"}
         return self._execute_steps(action.get("steps", []))
 
     def _execute_steps(self, steps: list[dict[str, Any]]) -> dict[str, Any]:
@@ -35,10 +41,19 @@ class KitRunner:
         return {"variables": dict(self.variables), "last_response": last_response}
 
     def _interpolate(self, text: str) -> str:
-        return re.sub(r'\{(\w+)\}', lambda m: str(self.variables.get(m.group(1), m.group(0))), text)
+        return re.sub(
+            r"\{(\w+)\}",
+            lambda m: str(self.variables.get(m.group(1), m.group(0))),
+            text,
+        )
 
     def _step_http(self, step: dict[str, Any]) -> dict[str, Any]:
-        req: dict[str, Any] = {"type": "http", "method": step.get("method", "GET"), "url": self._interpolate(step.get("url", "")), "extract": False}
+        req: dict[str, Any] = {
+            "type": "http",
+            "method": step.get("method", "GET"),
+            "url": self._interpolate(step.get("url", "")),
+            "extract": False,
+        }
         if step.get("headers"):
             req["headers"] = step["headers"]
         if step.get("body"):
@@ -69,7 +84,7 @@ class KitRunner:
         if path == "$":
             return data
         if path.startswith("$[:") and path.endswith("]"):
-            return data[:int(path[3:-1])] if isinstance(data, list) else data
+            return data[: int(path[3:-1])] if isinstance(data, list) else data
         if path.startswith("$."):
             return data.get(path[2:]) if isinstance(data, dict) else data
         return data

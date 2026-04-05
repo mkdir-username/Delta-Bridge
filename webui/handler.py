@@ -1,12 +1,13 @@
 """IoE HTTP request handler."""
+
 from __future__ import annotations
 import sys
 import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import json
 import re as _re
 import uuid
-import secrets
 import time
 import threading
 import logging
@@ -20,11 +21,27 @@ from transport import imap_conn, send_request, poll_response
 log = logging.getLogger("ioe-web")
 
 _ERROR_MAP = [
-    (_re.compile(r"UNAVAILABLE", _re.I), "transport", "Сервер почты недоступен, попробуйте позже"),
+    (
+        _re.compile(r"UNAVAILABLE", _re.I),
+        "transport",
+        "Сервер почты недоступен, попробуйте позже",
+    ),
     (_re.compile(r"timeout", _re.I), "transport", None),
-    (_re.compile(r"Connection refused|Network is unreachable|ConnectionReset", _re.I), "transport", "Нет соединения с сервером"),
-    (_re.compile(r"session expired|not registered|auth.*required", _re.I), "auth", "Сессия истекла, войдите заново"),
-    (_re.compile(r"all available options.*already used", _re.I), "rate_limit", "Слишком много попыток. Подождите 10 минут"),
+    (
+        _re.compile(r"Connection refused|Network is unreachable|ConnectionReset", _re.I),
+        "transport",
+        "Нет соединения с сервером",
+    ),
+    (
+        _re.compile(r"session expired|not registered|auth.*required", _re.I),
+        "auth",
+        "Сессия истекла, войдите заново",
+    ),
+    (
+        _re.compile(r"all available options.*already used", _re.I),
+        "rate_limit",
+        "Слишком много попыток. Подождите 10 минут",
+    ),
     (_re.compile(r"wait of (\d+) seconds", _re.I), "rate_limit", None),
     (_re.compile(r"phone number is invalid", _re.I), "vps", "Неверный номер телефона"),
 ]
@@ -40,20 +57,32 @@ def _classify_error(raw: object) -> tuple[str, str]:
                     try:
                         secs = int(m.group(1))
                         mins = max(1, secs // 60)
-                        return err_type, "Подождите {} мин".format(mins)
+                        return err_type, f"Подождите {mins} мин"
                     except (IndexError, ValueError):
                         pass
                 return err_type, s
             return err_type, msg
-    return "vps", "Ошибка сервера: {}".format(s)
+    return "vps", f"Ошибка сервера: {s}"
 
 
 def _humanize_error(raw: object) -> str:
     _, msg = _classify_error(raw)
     return msg
 
-_TG_ALLOWED_KEYS: set[str] = {"phone", "code", "password", "chat_id", "text", "limit",
-                              "offset_id", "reply_to_id", "message_id", "folder", "query"}
+
+_TG_ALLOWED_KEYS: set[str] = {
+    "phone",
+    "code",
+    "password",
+    "chat_id",
+    "text",
+    "limit",
+    "offset_id",
+    "reply_to_id",
+    "message_id",
+    "folder",
+    "query",
+}
 
 _auth_attempts: dict[str, list[float]] = {}
 _login_request_owners: dict[str, str] = {}
@@ -86,20 +115,38 @@ class Handler(BaseHTTPRequestHandler):
         if cmd == "SEARCH":
             q = qs.get("q", [""])[0]
             results = [
-                {"title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0435 \u2014 \u042f\u043d\u0434\u0435\u043a\u0441", "href": "https://yandex.ru/pogoda/saint-petersburg", "snippet": "\u0421\u0435\u0433\u043e\u0434\u043d\u044f +4\u00b0, \u043e\u0431\u043b\u0430\u0447\u043d\u043e. \u0417\u0430\u0432\u0442\u0440\u0430 +6\u00b0, \u0432\u043e\u0437\u043c\u043e\u0436\u0435\u043d \u0434\u043e\u0436\u0434\u044c."},
-                {"title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0421\u041f\u0431 \u2014 Gismeteo", "href": "https://www.gismeteo.ru/weather-saint-petersburg/", "snippet": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043d\u043e\u0437 \u043f\u043e\u0433\u043e\u0434\u044b \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f, \u0437\u0430\u0432\u0442\u0440\u0430, \u043d\u0435\u0434\u0435\u043b\u044e."},
-                {"title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u041f\u0438\u0442\u0435\u0440\u0435 \u0441\u0435\u0439\u0447\u0430\u0441 \u2014 rp5.ru", "href": "https://rp5.ru/spb", "snippet": "\u0422\u0435\u043a\u0443\u0449\u0430\u044f \u0442\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 +3\u00b0C, \u0432\u0435\u0442\u0435\u0440 5 \u043c/\u0441, \u0432\u043b\u0430\u0436\u043d\u043e\u0441\u0442\u044c 78%."},
-                {"title": "\u041a\u043b\u0438\u043c\u0430\u0442 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0430 \u2014 \u0412\u0438\u043a\u0438\u043f\u0435\u0434\u0438\u044f", "href": "https://ru.wikipedia.org/wiki/\u041a\u043b\u0438\u043c\u0430\u0442_\u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0430", "snippet": "\u041a\u043b\u0438\u043c\u0430\u0442 \u0443\u043c\u0435\u0440\u0435\u043d\u043d\u044b\u0439. \u0421\u0440\u0435\u0434\u043d\u044f\u044f \u0442\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 \u043c\u0430\u0440\u0442\u0430 \u2212\u2060\u0031\u2026+4\u00b0C."},
+                {
+                    "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0435 \u2014 \u042f\u043d\u0434\u0435\u043a\u0441",
+                    "href": "https://yandex.ru/pogoda/saint-petersburg",
+                    "snippet": "\u0421\u0435\u0433\u043e\u0434\u043d\u044f +4\u00b0, \u043e\u0431\u043b\u0430\u0447\u043d\u043e. \u0417\u0430\u0432\u0442\u0440\u0430 +6\u00b0, \u0432\u043e\u0437\u043c\u043e\u0436\u0435\u043d \u0434\u043e\u0436\u0434\u044c.",
+                },
+                {
+                    "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0421\u041f\u0431 \u2014 Gismeteo",
+                    "href": "https://www.gismeteo.ru/weather-saint-petersburg/",
+                    "snippet": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043d\u043e\u0437 \u043f\u043e\u0433\u043e\u0434\u044b \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f, \u0437\u0430\u0432\u0442\u0440\u0430, \u043d\u0435\u0434\u0435\u043b\u044e.",
+                },
+                {
+                    "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u041f\u0438\u0442\u0435\u0440\u0435 \u0441\u0435\u0439\u0447\u0430\u0441 \u2014 rp5.ru",
+                    "href": "https://rp5.ru/spb",
+                    "snippet": "\u0422\u0435\u043a\u0443\u0449\u0430\u044f \u0442\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 +3\u00b0C, \u0432\u0435\u0442\u0435\u0440 5 \u043c/\u0441, \u0432\u043b\u0430\u0436\u043d\u043e\u0441\u0442\u044c 78%.",
+                },
+                {
+                    "title": "\u041a\u043b\u0438\u043c\u0430\u0442 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0430 \u2014 \u0412\u0438\u043a\u0438\u043f\u0435\u0434\u0438\u044f",
+                    "href": "https://ru.wikipedia.org/wiki/\u041a\u043b\u0438\u043c\u0430\u0442_\u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0430",
+                    "snippet": "\u041a\u043b\u0438\u043c\u0430\u0442 \u0443\u043c\u0435\u0440\u0435\u043d\u043d\u044b\u0439. \u0421\u0440\u0435\u0434\u043d\u044f\u044f \u0442\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 \u043c\u0430\u0440\u0442\u0430 \u2212\u2060\u0031\u2026+4\u00b0C.",
+                },
             ]
             self.respond_json({"status": "ready", "results": results})
         elif cmd in ("GET", "TEXT"):
             url = qs.get("url", [""])[0]
-            self.respond_json({
-                "status": "ready",
-                "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0435 \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f",
-                "body": "# \u041f\u043e\u0433\u043e\u0434\u0430\n\n\u0421\u0435\u0433\u043e\u0434\u043d\u044f +5\u00b0C, \u043e\u0431\u043b\u0430\u0447\u043d\u043e.\n\n## \u041f\u0440\u043e\u0433\u043d\u043e\u0437\n\n- \u041f\u043d +4\u00b0 \u0434\u043e\u0436\u0434\u044c\n- \u0412\u0442 +6\u00b0 \u043e\u0431\u043b\u0430\u0447\u043d\u043e\n- \u0421\u0440 +7\u00b0 \u0441\u043e\u043b\u043d\u0435\u0447\u043d\u043e",
-                "format": "markdown",
-            })
+            self.respond_json(
+                {
+                    "status": "ready",
+                    "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0435 \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f",
+                    "body": "# \u041f\u043e\u0433\u043e\u0434\u0430\n\n\u0421\u0435\u0433\u043e\u0434\u043d\u044f +5\u00b0C, \u043e\u0431\u043b\u0430\u0447\u043d\u043e.\n\n## \u041f\u0440\u043e\u0433\u043d\u043e\u0437\n\n- \u041f\u043d +4\u00b0 \u0434\u043e\u0436\u0434\u044c\n- \u0412\u0442 +6\u00b0 \u043e\u0431\u043b\u0430\u0447\u043d\u043e\n- \u0421\u0440 +7\u00b0 \u0441\u043e\u043b\u043d\u0435\u0447\u043d\u043e",
+                    "format": "markdown",
+                }
+            )
         else:
             self.respond_json({"status": "error", "error": "unknown cmd"})
 
@@ -135,7 +182,10 @@ class Handler(BaseHTTPRequestHandler):
                         body = json.dumps(result, ensure_ascii=False).encode("utf-8")
                         self.send_response(200)
                         self.send_header("Content-Type", "application/json; charset=utf-8")
-                        self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}".format(sid, auth.SESSION_TTL))
+                        self.send_header(
+                            "Set-Cookie",
+                            f"sid={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={auth.SESSION_TTL}",
+                        )
                         self.end_headers()
                         self.wfile.write(body)
                         return
@@ -180,7 +230,16 @@ class Handler(BaseHTTPRequestHandler):
                         result = {"status": "ready"}
                         if "results" in resp:
                             result["results"] = resp["results"]
-                        elif resp.get("type") == "command" or "dialogs" in resp or "messages" in resp or "unread_chats" in resp or "message_id" in resp or "auth_status" in resp or "results" not in resp and "body" not in resp:
+                        elif (
+                            resp.get("type") == "command"
+                            or "dialogs" in resp
+                            or "messages" in resp
+                            or "unread_chats" in resp
+                            or "message_id" in resp
+                            or "auth_status" in resp
+                            or "results" not in resp
+                            and "body" not in resp
+                        ):
                             for key in resp:
                                 if key not in ("id", "status"):
                                     result[key] = resp[key]
@@ -202,7 +261,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path in ("/get", "/text", "/search"):
-            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+            req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             cmd = parsed.path.lstrip("/").upper()
 
             if ioe_web.DEMO_MODE:
@@ -217,7 +276,12 @@ class Handler(BaseHTTPRequestHandler):
                 req = {"id": req_id, "cmd": cmd, "url": url, "user_id": user_id}
             try:
                 t0 = time.time()
-                log.info("[%s] send: %s %s", req_id, cmd, req.get("query", req.get("url", "")))
+                log.info(
+                    "[%s] send: %s %s",
+                    req_id,
+                    cmd,
+                    req.get("query", req.get("url", "")),
+                )
                 m = imap_conn()
                 send_request(m, req)
                 m.logout()
@@ -233,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/proxy":
-            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+            req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
 
             if ioe_web.DEMO_MODE:
                 self.respond_json({"status": "error", "error": "proxy not available in demo"})
@@ -278,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/tg":
-            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+            req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             action = qs.get("action", [""])[0]
 
             if ioe_web.DEMO_MODE:
@@ -324,7 +388,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/claude":
-            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+            req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             action = qs.get("action", [""])[0]
             text = qs.get("text", [""])[0]
             model = qs.get("model", [""])[0]
@@ -366,6 +430,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/kit":
             import glob as _glob
+
             kit_name = qs.get("kit", [""])[0]
             kits_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kits")
             if not kit_name:
@@ -376,17 +441,29 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         with open(f) as fh:
                             k = json.load(fh)
-                            kits.append({"file": os.path.basename(f), "service": k.get("service", ""), "description": k.get("description", ""), "actions": list(k.get("actions", {}).keys())})
+                            kits.append(
+                                {
+                                    "file": os.path.basename(f),
+                                    "service": k.get("service", ""),
+                                    "description": k.get("description", ""),
+                                    "actions": list(k.get("actions", {}).keys()),
+                                }
+                            )
                     except Exception as e:
                         log.warning("Kit load failed %s: %s", f, e)
                         continue
                 self.respond_json({"kits": kits})
                 return
-            self.respond_json({"status": "error", "error": "kit execution via WebUI not yet supported"})
+            self.respond_json(
+                {
+                    "status": "error",
+                    "error": "kit execution via WebUI not yet supported",
+                }
+            )
             return
 
         if parsed.path == "/browser":
-            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+            req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             url = qs.get("url", [""])[0]
 
             if ioe_web.DEMO_MODE:
@@ -420,6 +497,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_login(self, error: str = "", status: int = 200) -> None:
         from html_templates import login_page
+
         body = login_page(error).encode()
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -429,7 +507,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_login_tg_post(self) -> None:
         import ioe_web
-        import secrets
 
         content_length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(content_length) if content_length else b"{}"
@@ -448,12 +525,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if action == "auth_start" and not auth.is_whitelisted(phone):
             time.sleep(2)
-            req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+            req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             login_user_id = phone or "login"
             with ioe_web.lock:
                 ioe_web.pending[(login_user_id, req_id)] = {
-                    "id": req_id, "status": 200,
-                    "auth_status": "error", "error": "authentication failed"
+                    "id": req_id,
+                    "status": 200,
+                    "auth_status": "error",
+                    "error": "authentication failed",
                 }
             _login_request_owners[req_id] = login_user_id
             self.respond_json({"id": req_id, "status": "pending"})
@@ -479,11 +558,14 @@ class Handler(BaseHTTPRequestHandler):
             attempts.append(now)
             _code_attempts[phone] = attempts
 
-        req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+        req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
         login_user_id = phone or "login"
         req = {
-            "id": req_id, "type": "command", "service": "telegram",
-            "action": action, "user_id": login_user_id,
+            "id": req_id,
+            "type": "command",
+            "service": "telegram",
+            "action": action,
+            "user_id": login_user_id,
         }
         for key in ("phone", "code", "password"):
             if key in body:
@@ -557,7 +639,10 @@ class Handler(BaseHTTPRequestHandler):
                 body_bytes = json.dumps(result, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}".format(sid, auth.SESSION_TTL))
+                self.send_header(
+                    "Set-Cookie",
+                    f"sid={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={auth.SESSION_TTL}",
+                )
                 self._add_security_headers()
                 self.end_headers()
                 self.wfile.write(body_bytes)
@@ -588,7 +673,10 @@ class Handler(BaseHTTPRequestHandler):
                 sid = auth.create_session(username)
                 self.send_response(302)
                 self.send_header("Location", "/")
-                self.send_header("Set-Cookie", "sid={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}".format(sid, auth.SESSION_TTL))
+                self.send_header(
+                    "Set-Cookie",
+                    f"sid={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={auth.SESSION_TTL}",
+                )
                 self.end_headers()
             else:
                 self._serve_login("Неверный логин или пароль")
@@ -621,7 +709,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"status": "error", "error": "invalid JSON"}, 400)
             return
 
-        req_id = "{}-{}".format(ioe_web.DEVICE_ID, uuid.uuid4().hex[:6])
+        req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
         action = body.get("action", "")
 
         if ioe_web.DEMO_MODE:

@@ -1,4 +1,5 @@
 """Shared type definitions for Delta-Bridge IoE protocol."""
+
 from __future__ import annotations
 from typing import Any, TypedDict, NotRequired
 
