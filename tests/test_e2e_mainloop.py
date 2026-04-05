@@ -3,10 +3,10 @@
 These tests would have caught the 2-day zombie IMAP bug from 2026-04-03:
 server stayed connected but search() returned [] silently.
 """
+
 import json
 import os
 import sys
-import threading
 import types
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -18,20 +18,33 @@ _root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_root, "server"))
 sys.path.insert(0, os.path.dirname(__file__))
 
-for _mod in ["truststore", "imapclient", "readability", "PIL", "PIL.Image",
-             "requests", "trafilatura"]:
+for _mod in [
+    "truststore",
+    "imapclient",
+    "readability",
+    "PIL",
+    "PIL.Image",
+    "requests",
+    "trafilatura",
+]:
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
 sys.modules["truststore"].inject_into_ssl = lambda: None
 sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
-sys.modules["readability"].Document = type("Document", (), {
-    "__init__": lambda self, html="": None, "title": lambda self: "", "summary": lambda self: ""})
+sys.modules["readability"].Document = type(
+    "Document",
+    (),
+    {
+        "__init__": lambda self, html="": None,
+        "title": lambda self: "",
+        "summary": lambda self: "",
+    },
+)
 sys.modules["PIL.Image"] = sys.modules["PIL"]
 sys.modules["PIL"].Image = sys.modules["PIL"]
 sys.modules["requests"].get = lambda *a, **kw: None
 sys.modules["requests"].request = lambda *a, **kw: None
-sys.modules["requests"].Session = type("Session", (), {
-    "request": lambda *a, **kw: None, "close": lambda self: None})
+sys.modules["requests"].Session = type("Session", (), {"request": lambda *a, **kw: None, "close": lambda self: None})
 sys.modules["trafilatura"].extract = lambda html, **kw: None
 
 os.environ.setdefault("EMAIL", "test@test.com")

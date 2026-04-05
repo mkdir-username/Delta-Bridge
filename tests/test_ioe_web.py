@@ -1,4 +1,5 @@
 """Tests for IoE WebUI v4."""
+
 import json
 import sys
 import os
@@ -34,12 +35,13 @@ def teardown_module(module):
 
 def get_html():
     import ioe_web
+
     return ioe_web.HTML_PAGE
 
 
 def get_free_port():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(('', 0))
+    s.bind(("", 0))
     port = s.getsockname()[1]
     s.close()
     return port
@@ -56,79 +58,77 @@ class TestV4Design:
 
     def test_has_loading_styles(self):
         html = get_html()
-        assert '.loading' in html
-        assert '.spinner' in html
-        assert '@keyframes spin' in html
+        assert ".loading" in html
+        assert ".spinner" in html
+        assert "@keyframes spin" in html
 
     def test_has_result_card_styles(self):
         html = get_html()
-        assert '.result-card' in html
-        assert '.snippet' in html
+        assert ".result-card" in html
+        assert ".snippet" in html
 
     def test_has_reader_styles(self):
         html = get_html()
-        assert '.reader-body' in html
-        assert '.reader-meta' in html
-        assert '.back-btn' in html
-        assert 'font-read' in html
+        assert ".reader-body" in html
+        assert ".reader-meta" in html
+        assert ".back-btn" in html
+        assert "font-read" in html
 
     def test_has_footer(self):
         assert 'id="statusText"' in get_html()
-        assert '<footer>' in get_html()
+        assert "<footer>" in get_html()
 
     def test_has_scroll_top(self):
-        assert 'scroll-top' in get_html()
+        assert "scroll-top" in get_html()
 
     def test_button_disabled(self):
-        assert 'disabled' in get_html()
+        assert "disabled" in get_html()
 
     def test_no_pico_css(self):
-        assert 'picocss' not in get_html()
+        assert "picocss" not in get_html()
 
     def test_has_format_raw_text(self):
-        assert 'formatRawText' in get_html()
+        assert "formatRawText" in get_html()
 
     def test_has_marked_js(self):
         html = get_html()
-        assert 'marked' in html
-        assert 'Lexer' in html  # inlined marked.js contains Lexer class
+        assert "marked" in html
+        assert "Lexer" in html  # inlined marked.js contains Lexer class
 
     def test_has_markdown_render_logic(self):
-        assert 'marked.parse' in get_html()
+        assert "marked.parse" in get_html()
 
     def test_has_custom_renderer(self):
         html = get_html()
-        assert 'new marked.Renderer' in html or 'ioeRenderer' in html
+        assert "new marked.Renderer" in html or "ioeRenderer" in html
 
     def test_marked_js_is_inlined(self):
         html = get_html()
-        assert 'cdn.jsdelivr.net' not in html
-        assert 'Lexer' in html or 'marked' in html
+        assert "cdn.jsdelivr.net" not in html
+        assert "Lexer" in html or "marked" in html
 
     def test_url_detection_requires_latin_tld(self):
         html = get_html()
-        assert '[a-zA-Z]' in html
+        assert "[a-zA-Z]" in html
 
     def test_has_copy_markdown(self):
         html = get_html()
-        assert 'copyMd' in html or 'clipboard' in html
+        assert "copyMd" in html or "clipboard" in html
 
     def test_has_word_count_display(self):
-        assert 'word_count' in get_html()
+        assert "word_count" in get_html()
 
     def test_cmd_click_support(self):
-        assert 'metaKey' in get_html()
-        assert 'ctrlKey' in get_html()
+        assert "metaKey" in get_html()
+        assert "ctrlKey" in get_html()
 
 
 class TestRewriteLinks:
     def test_double_quote_href(self):
-        import ioe_web
         result = transport.rewrite_links('<a href="https://example.com/page">Link</a>')
-        assert '/get?url=https://example.com/page' in result
+        assert "/get?url=https://example.com/page" in result
 
     def test_relative_links_untouched(self):
-        import ioe_web
         result = transport.rewrite_links('<a href="/about">About</a>')
         assert 'href="/about"' in result
 
@@ -136,11 +136,12 @@ class TestRewriteLinks:
 class TestEndpoints:
     def test_root_returns_html(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/", timeout=5)
         body = resp.read().decode()
         assert resp.status == 200
         assert "IoE" in body
@@ -149,13 +150,14 @@ class TestEndpoints:
 
     def test_search_returns_pending(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        with patch.object(handler, 'imap_conn') as mock:
+        with patch.object(handler, "imap_conn") as mock:
             mock.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            resp = urlopen("http://127.0.0.1:{}/search?q=test".format(port), timeout=5)
+            resp = urlopen(f"http://127.0.0.1:{port}/search?q=test", timeout=5)
             data = json.loads(resp.read().decode())
             assert data["status"] == "pending"
             assert "id" in data
@@ -163,14 +165,19 @@ class TestEndpoints:
 
     def test_status_returns_results_for_search(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         test_results = [{"title": "Test", "href": "https://test.com", "snippet": "Desc"}]
         with ioe_web.lock:
-            ioe_web.pending[(TEST_USER, "test123")] = {"id": "test123", "status": 200, "results": test_results}
+            ioe_web.pending[(TEST_USER, "test123")] = {
+                "id": "test123",
+                "status": 200,
+                "results": test_results,
+            }
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/status?id=test123".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/status?id=test123", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["status"] == "ready"
         assert data["results"] == test_results
@@ -178,13 +185,19 @@ class TestEndpoints:
 
     def test_status_returns_body_for_page(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         with ioe_web.lock:
-            ioe_web.pending[(TEST_USER, "page123")] = {"id": "page123", "status": 200, "title": "Page", "body": "<p>Content</p>"}
+            ioe_web.pending[(TEST_USER, "page123")] = {
+                "id": "page123",
+                "status": 200,
+                "title": "Page",
+                "body": "<p>Content</p>",
+            }
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/status?id=page123".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/status?id=page123", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["status"] == "ready"
         assert data["title"] == "Page"
@@ -195,13 +208,14 @@ class TestEndpoints:
 class TestDemoMode:
     def test_demo_search_returns_results(self):
         import ioe_web
+
         old = ioe_web.DEMO_MODE
         ioe_web.DEMO_MODE = True
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/search?q=weather".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/search?q=weather", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["status"] == "ready"
         assert isinstance(data["results"], list)
@@ -211,13 +225,14 @@ class TestDemoMode:
 
     def test_demo_get_returns_body(self):
         import ioe_web
+
         old = ioe_web.DEMO_MODE
         ioe_web.DEMO_MODE = True
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/get?url=https://example.com".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/get?url=https://example.com", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["status"] == "ready"
         assert "title" in data
@@ -229,31 +244,38 @@ class TestDemoMode:
 class TestStatusEndpoint:
     def test_status_passes_format_field(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         with ioe_web.lock:
             ioe_web.pending[(TEST_USER, "fmt123")] = {
-                "id": "fmt123", "status": 200,
-                "title": "T", "body": "B", "format": "markdown",
+                "id": "fmt123",
+                "status": 200,
+                "title": "T",
+                "body": "B",
+                "format": "markdown",
             }
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/status?id=fmt123".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/status?id=fmt123", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["format"] == "markdown"
         server.server_close()
 
     def test_status_error_response(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         with ioe_web.lock:
             ioe_web.pending[(TEST_USER, "err123")] = {
-                "id": "err123", "status": 500, "error": "HTTPError",
+                "id": "err123",
+                "status": 500,
+                "error": "HTTPError",
             }
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/status?id=err123".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/status?id=err123", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["status"] == "error"
         assert data["error"] == "HTTPError"
@@ -261,16 +283,19 @@ class TestStatusEndpoint:
 
     def test_status_default_format_html(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         with ioe_web.lock:
             ioe_web.pending[(TEST_USER, "nofmt")] = {
-                "id": "nofmt", "status": 200,
-                "title": "T", "body": "<p>B</p>",
+                "id": "nofmt",
+                "status": 200,
+                "title": "T",
+                "body": "<p>B</p>",
             }
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/status?id=nofmt".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/status?id=nofmt", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["format"] == "html"
         server.server_close()
@@ -278,13 +303,14 @@ class TestStatusEndpoint:
     def test_404_for_unknown_path(self):
         import ioe_web
         from urllib.error import HTTPError as UrlHTTPError
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
         try:
-            urlopen("http://127.0.0.1:{}/nonexistent".format(port), timeout=5)
-            assert False, "expected 404"
+            urlopen(f"http://127.0.0.1:{port}/nonexistent", timeout=5)
+            raise AssertionError("expected 404")
         except UrlHTTPError as e:
             assert e.code == 404
         server.server_close()
@@ -293,13 +319,17 @@ class TestStatusEndpoint:
 class TestProxyEndpoint:
     def test_proxy_returns_pending(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        with patch.object(handler, 'imap_conn') as mock:
+        with patch.object(handler, "imap_conn") as mock:
             mock.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            resp = urlopen("http://127.0.0.1:{}/proxy?method=GET&url=https://example.com".format(port), timeout=5)
+            resp = urlopen(
+                f"http://127.0.0.1:{port}/proxy?method=GET&url=https://example.com",
+                timeout=5,
+            )
             data = json.loads(resp.read().decode())
             assert data["status"] == "pending"
             assert "id" in data
@@ -307,33 +337,42 @@ class TestProxyEndpoint:
 
     def test_proxy_sends_type_http(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
+
         def capture_send(m, req):
             sent_data.update(req)
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/proxy?method=POST&url=https://api.test.com&extract=false".format(port), timeout=5)
+            urlopen(
+                f"http://127.0.0.1:{port}/proxy?method=POST&url=https://api.test.com&extract=false",
+                timeout=5,
+            )
         assert sent_data.get("type") == "http"
         assert sent_data.get("method") == "POST"
-        assert sent_data.get("extract") == False
+        assert not sent_data.get("extract")
         server.server_close()
 
 
 class TestDemoFormatField:
     def test_demo_get_has_format(self):
         import ioe_web
+
         old = ioe_web.DEMO_MODE
         ioe_web.DEMO_MODE = True
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/get?url=https://example.com".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/get?url=https://example.com", timeout=5)
         data = json.loads(resp.read().decode())
         assert "format" in data
         server.server_close()
@@ -343,65 +382,88 @@ class TestDemoFormatField:
 class TestUserIdInRequests:
     def test_user_id_from_auth_session(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
+
         def capture_send(m, req):
             sent_data.update(req)
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/search?q=test".format(port), timeout=5)
+            urlopen(f"http://127.0.0.1:{port}/search?q=test", timeout=5)
         assert sent_data.get("user_id") == TEST_USER
         server.server_close()
 
     def test_get_request_includes_user_id(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
+
         def capture_send(m, req):
             sent_data.update(req)
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/get?url=https://example.com".format(port), timeout=5)
+            urlopen(f"http://127.0.0.1:{port}/get?url=https://example.com", timeout=5)
         assert sent_data.get("user_id") == TEST_USER
         server.server_close()
 
     def test_proxy_request_includes_user_id(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
+
         def capture_send(m, req):
             sent_data.update(req)
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/proxy?method=GET&url=https://example.com".format(port), timeout=5)
+            urlopen(
+                f"http://127.0.0.1:{port}/proxy?method=GET&url=https://example.com",
+                timeout=5,
+            )
         assert sent_data.get("user_id") == TEST_USER
         server.server_close()
 
     def test_tg_request_includes_user_id(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
+
         def capture_send(m, req):
             sent_data.update(req)
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/tg?action=get_dialogs".format(port), timeout=5)
+            urlopen(f"http://127.0.0.1:{port}/tg?action=get_dialogs", timeout=5)
         assert sent_data.get("user_id") == TEST_USER
         server.server_close()
 
@@ -409,31 +471,36 @@ class TestUserIdInRequests:
 class TestNotifications:
     def test_notification_queues_exists(self):
         import ioe_web
-        assert hasattr(ioe_web, 'notification_queues')
+
+        assert hasattr(ioe_web, "notification_queues")
         assert isinstance(ioe_web.notification_queues, dict)
 
     def test_notifications_endpoint_returns_empty(self):
         import ioe_web
+
         ioe_web.notification_queues[TEST_USER] = []
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/notifications".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/notifications", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["notifications"] == []
         server.server_close()
 
     def test_notifications_endpoint_returns_and_clears(self):
         import ioe_web
+
         ioe_web.notification_queues[TEST_USER] = []
         with ioe_web.lock:
-            ioe_web.notification_queues.setdefault(TEST_USER, []).append({"type": "notification", "service": "telegram", "text": "hello"})
+            ioe_web.notification_queues.setdefault(TEST_USER, []).append(
+                {"type": "notification", "service": "telegram", "text": "hello"}
+            )
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/notifications".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/notifications", timeout=5)
         data = json.loads(resp.read().decode())
         assert len(data["notifications"]) == 1
         assert data["notifications"][0]["text"] == "hello"
@@ -443,6 +510,7 @@ class TestNotifications:
 
     def test_poll_response_captures_notification(self):
         import ioe_web
+
         ioe_web.notification_queues[TEST_USER] = []
         notif_msg = {"type": "notification", "service": "telegram", "text": "new msg"}
         normal_resp = {"id": "req123", "status": 200, "body": "ok"}
@@ -471,10 +539,15 @@ class TestNotifications:
         mock_imap.select.return_value = ("OK", [b"INBOX"])
         mock_imap.noop.return_value = ("OK", [])
         mock_imap.search.return_value = ("OK", [b"1 2"])
-        mock_imap.fetch.side_effect = lambda uid, _: ("OK", [(uid, raw_notif if uid == b"2" else raw_resp)])
+        mock_imap.fetch.side_effect = lambda uid, _: (
+            "OK",
+            [(uid, raw_notif if uid == b"2" else raw_resp)],
+        )
 
-        with patch.object(transport, 'imap_conn', return_value=mock_imap), \
-             patch('time.sleep'):
+        with (
+            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch("time.sleep"),
+        ):
             poll_thread = threading.Thread(target=transport.poll_response, args=(TEST_USER, "req123"), daemon=True)
             poll_thread.start()
             poll_thread.join(timeout=10)
@@ -490,11 +563,12 @@ class TestNotifications:
 class TestKitEndpoint:
     def test_kit_list_returns_kits(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/kit".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/kit", timeout=5)
         data = json.loads(resp.read().decode())
         assert "kits" in data
         services = [k["service"] for k in data["kits"]]
@@ -503,11 +577,12 @@ class TestKitEndpoint:
 
     def test_kit_list_excludes_templates(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/kit".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/kit", timeout=5)
         data = json.loads(resp.read().decode())
         services = [k["service"] for k in data["kits"]]
         assert "_template_auth" not in services
@@ -518,31 +593,32 @@ class TestBrowserMode:
     def test_html_has_browser_mode_toggle(self):
         html = get_html()
         assert 'id="btnBrowser"' in html
-        assert 'toggleBrowserMode' in html
+        assert "toggleBrowserMode" in html
 
     def test_css_has_browser_toggle_style(self):
         html = get_html()
-        assert '.toolbar-toggle' in html
+        assert ".toolbar-toggle" in html
 
     def test_js_has_browser_mode_var(self):
         html = get_html()
-        assert 'var browserMode' in html
-        assert 'toggleBrowserMode' in html
+        assert "var browserMode" in html
+        assert "toggleBrowserMode" in html
 
     def test_js_openpage_checks_browser_mode(self):
         html = get_html()
-        assert 'browserMode' in html
-        assert '/browser?' in html
+        assert "browserMode" in html
+        assert "/browser?" in html
 
     def test_browser_endpoint_demo_mode(self):
         import ioe_web
+
         old = ioe_web.DEMO_MODE
         ioe_web.DEMO_MODE = True
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        resp = urlopen("http://127.0.0.1:{}/browser?url=https://example.com".format(port), timeout=5)
+        resp = urlopen(f"http://127.0.0.1:{port}/browser?url=https://example.com", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["status"] == "error"
         assert "demo" in data["error"]
@@ -551,14 +627,17 @@ class TestBrowserMode:
 
     def test_browser_endpoint_returns_pending(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request'):
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request"),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            resp = urlopen("http://127.0.0.1:{}/browser?url=https://example.com".format(port), timeout=5)
+            resp = urlopen(f"http://127.0.0.1:{port}/browser?url=https://example.com", timeout=5)
             data = json.loads(resp.read().decode())
             assert data["status"] == "pending"
             assert "id" in data
@@ -566,17 +645,22 @@ class TestBrowserMode:
 
     def test_browser_endpoint_sends_browser_type(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
+
         def capture_send(m, req):
             sent_data.update(req)
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/browser?url=https://example.com".format(port), timeout=5)
+            urlopen(f"http://127.0.0.1:{port}/browser?url=https://example.com", timeout=5)
         assert sent_data.get("type") == "browser"
         assert sent_data.get("url") == "https://example.com"
         assert "goto" in sent_data.get("actions", [])
@@ -584,16 +668,21 @@ class TestBrowserMode:
 
     def test_browser_endpoint_includes_user_id(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
+
         def capture_send(m, req):
             sent_data.update(req)
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/browser?url=https://example.com".format(port), timeout=5)
+            urlopen(f"http://127.0.0.1:{port}/browser?url=https://example.com", timeout=5)
         assert sent_data.get("user_id") == TEST_USER
         server.server_close()

@@ -1,4 +1,5 @@
 """Tests for webui/auth.py"""
+
 import sys
 import os
 import json
@@ -105,7 +106,13 @@ def test_expired_sessions_not_loaded(tmp_path):
     sessions_file = str(tmp_path / "sessions.json")
 
     old_time = time.time() - auth.SESSION_TTL - 100
-    fake_data = {"old_sid": {"user_id": "expired_user", "created": old_time, "last_seen": old_time}}
+    fake_data = {
+        "old_sid": {
+            "user_id": "expired_user",
+            "created": old_time,
+            "last_seen": old_time,
+        }
+    }
     with open(sessions_file, "w") as f:
         json.dump(fake_data, f)
 
@@ -182,7 +189,9 @@ def test_otp_phone_rate_limit_window():
         auth.check_otp_rate_limit(phone)
     assert auth.check_otp_rate_limit(phone) is False
     auth._otp_phone_rate[auth._normalize_phone(phone)] = [
-        time.time() - 400, time.time() - 400, time.time() - 400
+        time.time() - 400,
+        time.time() - 400,
+        time.time() - 400,
     ]
     assert auth.check_otp_rate_limit(phone) is True
 
@@ -215,6 +224,7 @@ def test_verify_password_no_password_in_whitelist():
 
 def test_verify_password_correct():
     import bcrypt
+
     hashed = bcrypt.hashpw(b"secret123", bcrypt.gensalt()).decode()
     auth._whitelist = {"+79274918222": {"email": "t@t.com", "password": hashed}}
     assert auth.verify_password("+79274918222", "secret123") is True
@@ -223,6 +233,7 @@ def test_verify_password_correct():
 
 def test_hash_password_roundtrip():
     import bcrypt
+
     hashed = auth.hash_password("mypass")
     assert bcrypt.checkpw(b"mypass", hashed.encode()) is True
     assert bcrypt.checkpw(b"wrong", hashed.encode()) is False
@@ -250,6 +261,7 @@ def test_whitelist_integrity_check(tmp_path):
 
 def test_whitelist_tampered_rejected(tmp_path):
     import pytest as _pytest
+
     secret = "test-secret-key"
     users = {"+79274918222": {"email": "test@test.com"}}
     users_file = str(tmp_path / "users.json")

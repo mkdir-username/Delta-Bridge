@@ -23,6 +23,7 @@ def _make_response_mime(response_dict):
     from email.mime.base import MIMEBase
     from email.mime.text import MIMEText
     from email import encoders
+
     encrypted = encrypt(IOE_KEY, json.dumps(response_dict)).encode("ascii")
     msg = MIMEMultipart()
     msg.attach(MIMEText("body"))
@@ -50,6 +51,7 @@ class TestClient:
         from email.mime.multipart import MIMEMultipart
         from email.mime.base import MIMEBase
         from email import encoders
+
         msg = MIMEMultipart()
         part = MIMEBase("application", "pdf")
         part.set_payload(b"test-payload")
@@ -61,6 +63,7 @@ class TestClient:
 
     def test_extract_attachment_no_attachment(self):
         from email.mime.text import MIMEText
+
         msg = MIMEText("just text")
         result = client.extract_attachment(msg.as_bytes())
         assert result is None
@@ -89,6 +92,6 @@ class TestClient:
 
     def test_main_no_args_exits(self):
         import pytest
-        with patch.object(sys, "argv", ["client.py"]), \
-             pytest.raises(SystemExit):
+
+        with patch.object(sys, "argv", ["client.py"]), pytest.raises(SystemExit):
             client.main()

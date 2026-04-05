@@ -1,4 +1,5 @@
 """IoE WebUI: local web-based browser over IoE transport."""
+
 from __future__ import annotations
 from typing import Any
 import os
@@ -37,8 +38,14 @@ IMAP_HOST: str = "imap.yandex.ru"
 QUEUE_FOLDER: str = "IoE"
 
 SUBJECTS: list[str] = [
-    "Re: Встреча", "Fw: Документы", "Отчёт", "Заказ",
-    "Фото", "Бронирование", "Напоминание", "Чек",
+    "Re: Встреча",
+    "Fw: Документы",
+    "Отчёт",
+    "Заказ",
+    "Фото",
+    "Бронирование",
+    "Напоминание",
+    "Чек",
 ]
 FILENAMES: list[str] = ["report.pdf", "scan.pdf", "doc.pdf", "invoice.pdf"]
 BODIES: list[str] = ["", "см. вложение", "Документ"]
@@ -46,8 +53,10 @@ BODIES: list[str] = ["", "см. вложение", "Документ"]
 DEMO_MODE: bool = "--demo" in sys.argv
 
 import hashlib as _hashlib
+
 _device_seed: str = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
-    os.environ.get("USER", "cli"), os.uname().nodename)
+    os.environ.get("USER", "cli"), os.uname().nodename
+)
 DEVICE_ID: str = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
 
 pending: dict[str, dict[str, Any]] = {}
@@ -66,15 +75,14 @@ def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
     payload = json.dumps(request_dict)
     encrypted = encrypt(IOE_KEY, payload).encode("ascii")
     msg = MIMEMultipart()
-    msg["Subject"] = "{} {}".format(random.choice(SUBJECTS), uuid.uuid4().hex[:8])
+    msg["Subject"] = f"{random.choice(SUBJECTS)} {uuid.uuid4().hex[:8]}"
     msg["From"] = EMAIL
     msg["To"] = EMAIL
     msg.attach(MIMEText(random.choice(BODIES), "plain", "utf-8"))
     part = MIMEBase("application", "pdf")
     part.set_payload(encrypted)
     encoders.encode_base64(part)
-    part.add_header("Content-Disposition", "attachment",
-                    filename=random.choice(FILENAMES))
+    part.add_header("Content-Disposition", "attachment", filename=random.choice(FILENAMES))
     msg.attach(part)
     m.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
 
@@ -133,7 +141,12 @@ def poll_response(req_id: str) -> None:
                     rid = response.get("id", "")
                     if rid == req_id:
                         elapsed = time.time() - t0
-                        log.info("[%s] poll: FOUND response (%.1fs, status=%s)", req_id, elapsed, response.get("status"))
+                        log.info(
+                            "[%s] poll: FOUND response (%.1fs, status=%s)",
+                            req_id,
+                            elapsed,
+                            response.get("status"),
+                        )
                         try:
                             m.store(uid, "+FLAGS", "\\Deleted")
                             m.expunge()
@@ -147,9 +160,16 @@ def poll_response(req_id: str) -> None:
                     log.debug("[%s] poll: decrypt/parse skip uid=%s: %s", req_id, uid, e)
                     continue
             if cycle % 5 == 4:
-                log.debug("[%s] poll: cycle %d, %.0fs elapsed, %d uids checked", req_id, cycle, time.time() - t0, len(seen_uids))
+                log.debug(
+                    "[%s] poll: cycle %d, %.0fs elapsed, %d uids checked",
+                    req_id,
+                    cycle,
+                    time.time() - t0,
+                    len(seen_uids),
+                )
             if cycle % 10 == 9:
                 from datetime import datetime, timedelta
+
                 cutoff = (datetime.utcnow() - timedelta(minutes=5)).strftime("%d-%b-%Y")
                 try:
                     _, old = m.search(None, "BEFORE", cutoff)
@@ -162,7 +182,11 @@ def poll_response(req_id: str) -> None:
         elapsed = time.time() - t0
         log.warning("[%s] poll: TIMEOUT after %.0fs", req_id, elapsed)
         with lock:
-            pending[req_id] = {"id": req_id, "status": 504, "error": "timeout ({}s)".format(int(elapsed))}
+            pending[req_id] = {
+                "id": req_id,
+                "status": 504,
+                "error": f"timeout ({int(elapsed)}s)",
+            }
         m.logout()
     except Exception as e:
         elapsed = time.time() - t0
@@ -172,16 +196,8 @@ def poll_response(req_id: str) -> None:
 
 
 def rewrite_links(html: str) -> str:
-    html = re.sub(
-        r'href="(https?://[^"]+)"',
-        lambda m: 'href="/get?url={}"'.format(m.group(1)),
-        html
-    )
-    html = re.sub(
-        r"href='(https?://[^']+)'",
-        lambda m: "href='/get?url={}'".format(m.group(1)),
-        html
-    )
+    html = re.sub(r'href="(https?://[^"]+)"', lambda m: f'href="/get?url={m.group(1)}"', html)
+    html = re.sub(r"href='(https?://[^']+)'", lambda m: f"href='/get?url={m.group(1)}'", html)
     return html
 
 
@@ -219,7 +235,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
   --footer-height: 28px;
 }
 
-html { 
+html {
   font-size: 16px;
   background: var(--bg);
   color: var(--text);
@@ -632,10 +648,10 @@ footer .channel { color: var(--text-dim); }
   :root {
     --content-width: 100%;
   }
-  
+
   .reader-body { font-size: 16px; }
   .reader-meta h1 { font-size: 22px; }
-  
+
   main { padding: 16px 12px 32px; }
 }
 
@@ -1040,20 +1056,38 @@ class Handler(BaseHTTPRequestHandler):
         if cmd == "SEARCH":
             q = qs.get("q", [""])[0]
             results = [
-                {"title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0435 \u2014 \u042f\u043d\u0434\u0435\u043a\u0441", "href": "https://yandex.ru/pogoda/saint-petersburg", "snippet": "\u0421\u0435\u0433\u043e\u0434\u043d\u044f +4\u00b0, \u043e\u0431\u043b\u0430\u0447\u043d\u043e. \u0417\u0430\u0432\u0442\u0440\u0430 +6\u00b0, \u0432\u043e\u0437\u043c\u043e\u0436\u0435\u043d \u0434\u043e\u0436\u0434\u044c."},
-                {"title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0421\u041f\u0431 \u2014 Gismeteo", "href": "https://www.gismeteo.ru/weather-saint-petersburg/", "snippet": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043d\u043e\u0437 \u043f\u043e\u0433\u043e\u0434\u044b \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f, \u0437\u0430\u0432\u0442\u0440\u0430, \u043d\u0435\u0434\u0435\u043b\u044e."},
-                {"title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u041f\u0438\u0442\u0435\u0440\u0435 \u0441\u0435\u0439\u0447\u0430\u0441 \u2014 rp5.ru", "href": "https://rp5.ru/spb", "snippet": "\u0422\u0435\u043a\u0443\u0449\u0430\u044f \u0442\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 +3\u00b0C, \u0432\u0435\u0442\u0435\u0440 5 \u043c/\u0441, \u0432\u043b\u0430\u0436\u043d\u043e\u0441\u0442\u044c 78%."},
-                {"title": "\u041a\u043b\u0438\u043c\u0430\u0442 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0430 \u2014 \u0412\u0438\u043a\u0438\u043f\u0435\u0434\u0438\u044f", "href": "https://ru.wikipedia.org/wiki/Климат_Санкт-Петербурга", "snippet": "\u041a\u043b\u0438\u043c\u0430\u0442 \u0443\u043c\u0435\u0440\u0435\u043d\u043d\u044b\u0439. \u0421\u0440\u0435\u0434\u043d\u044f\u044f \u0442\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 \u043c\u0430\u0440\u0442\u0430 \u2212\u2060\u0031\u2026+4\u00b0C."},
+                {
+                    "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0435 \u2014 \u042f\u043d\u0434\u0435\u043a\u0441",
+                    "href": "https://yandex.ru/pogoda/saint-petersburg",
+                    "snippet": "\u0421\u0435\u0433\u043e\u0434\u043d\u044f +4\u00b0, \u043e\u0431\u043b\u0430\u0447\u043d\u043e. \u0417\u0430\u0432\u0442\u0440\u0430 +6\u00b0, \u0432\u043e\u0437\u043c\u043e\u0436\u0435\u043d \u0434\u043e\u0436\u0434\u044c.",
+                },
+                {
+                    "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0421\u041f\u0431 \u2014 Gismeteo",
+                    "href": "https://www.gismeteo.ru/weather-saint-petersburg/",
+                    "snippet": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043d\u043e\u0437 \u043f\u043e\u0433\u043e\u0434\u044b \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f, \u0437\u0430\u0432\u0442\u0440\u0430, \u043d\u0435\u0434\u0435\u043b\u044e.",
+                },
+                {
+                    "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u041f\u0438\u0442\u0435\u0440\u0435 \u0441\u0435\u0439\u0447\u0430\u0441 \u2014 rp5.ru",
+                    "href": "https://rp5.ru/spb",
+                    "snippet": "\u0422\u0435\u043a\u0443\u0449\u0430\u044f \u0442\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 +3\u00b0C, \u0432\u0435\u0442\u0435\u0440 5 \u043c/\u0441, \u0432\u043b\u0430\u0436\u043d\u043e\u0441\u0442\u044c 78%.",
+                },
+                {
+                    "title": "\u041a\u043b\u0438\u043c\u0430\u0442 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0430 \u2014 \u0412\u0438\u043a\u0438\u043f\u0435\u0434\u0438\u044f",
+                    "href": "https://ru.wikipedia.org/wiki/Климат_Санкт-Петербурга",
+                    "snippet": "\u041a\u043b\u0438\u043c\u0430\u0442 \u0443\u043c\u0435\u0440\u0435\u043d\u043d\u044b\u0439. \u0421\u0440\u0435\u0434\u043d\u044f\u044f \u0442\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 \u043c\u0430\u0440\u0442\u0430 \u2212\u2060\u0031\u2026+4\u00b0C.",
+                },
             ]
             self.respond_json({"status": "ready", "results": results})
         elif cmd in ("GET", "TEXT"):
             url = qs.get("url", [""])[0]
-            self.respond_json({
-                "status": "ready",
-                "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0435 \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f",
-                "body": "# \u041f\u043e\u0433\u043e\u0434\u0430\n\n\u0421\u0435\u0433\u043e\u0434\u043d\u044f +5\u00b0C, \u043e\u0431\u043b\u0430\u0447\u043d\u043e.\n\n## \u041f\u0440\u043e\u0433\u043d\u043e\u0437\n\n- \u041f\u043d +4\u00b0 \u0434\u043e\u0436\u0434\u044c\n- \u0412\u0442 +6\u00b0 \u043e\u0431\u043b\u0430\u0447\u043d\u043e\n- \u0421\u0440 +7\u00b0 \u0441\u043e\u043b\u043d\u0435\u0447\u043d\u043e",
-                "format": "markdown",
-            })
+            self.respond_json(
+                {
+                    "status": "ready",
+                    "title": "\u041f\u043e\u0433\u043e\u0434\u0430 \u0432 \u0421\u0430\u043d\u043a\u0442-\u041f\u0435\u0442\u0435\u0440\u0431\u0443\u0440\u0433\u0435 \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f",
+                    "body": "# \u041f\u043e\u0433\u043e\u0434\u0430\n\n\u0421\u0435\u0433\u043e\u0434\u043d\u044f +5\u00b0C, \u043e\u0431\u043b\u0430\u0447\u043d\u043e.\n\n## \u041f\u0440\u043e\u0433\u043d\u043e\u0437\n\n- \u041f\u043d +4\u00b0 \u0434\u043e\u0436\u0434\u044c\n- \u0412\u0442 +6\u00b0 \u043e\u0431\u043b\u0430\u0447\u043d\u043e\n- \u0421\u0440 +7\u00b0 \u0441\u043e\u043b\u043d\u0435\u0447\u043d\u043e",
+                    "format": "markdown",
+                }
+            )
         else:
             self.respond_json({"status": "error", "error": "unknown cmd"})
 
@@ -1085,16 +1119,18 @@ class Handler(BaseHTTPRequestHandler):
                             result["format"] = resp.get("format", "html")
                         self.respond_json(result)
                     else:
-                        self.respond_json({
-                            "status": "error",
-                            "error": resp.get("error", "unknown"),
-                        })
+                        self.respond_json(
+                            {
+                                "status": "error",
+                                "error": resp.get("error", "unknown"),
+                            }
+                        )
                     return
             self.respond_json({"status": "pending"})
             return
 
         if parsed.path in ("/get", "/text", "/search"):
-            req_id = "{}-{}".format(DEVICE_ID, uuid.uuid4().hex[:6])
+            req_id = f"{DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             cmd = parsed.path.lstrip("/").upper()
 
             if DEMO_MODE:
@@ -1109,7 +1145,12 @@ class Handler(BaseHTTPRequestHandler):
                 req = {"id": req_id, "cmd": cmd, "url": url}
             try:
                 t0 = time.time()
-                log.info("[%s] send: %s %s", req_id, cmd, req.get("query", req.get("url", "")))
+                log.info(
+                    "[%s] send: %s %s",
+                    req_id,
+                    cmd,
+                    req.get("query", req.get("url", "")),
+                )
                 m = imap_conn()
                 send_request(m, req)
                 m.logout()
@@ -1130,7 +1171,7 @@ def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8080
     server = HTTPServer(("0.0.0.0", port), Handler)
     mode = " (demo)" if DEMO_MODE else ""
-    print("IoE WebUI{}: http://localhost:{}".format(mode, port))
+    print(f"IoE WebUI{mode}: http://localhost:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

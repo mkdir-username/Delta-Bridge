@@ -10,6 +10,7 @@ log = logging.getLogger("ioe.browser")
 
 try:
     from playwright.sync_api import sync_playwright
+
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -41,7 +42,7 @@ class BrowserPool:
                 return None
             browser = self._ensure_browser()
             page = browser.new_page()
-            sid = session_id or "page_{}".format(len(self.pages))
+            sid = session_id or f"page_{len(self.pages)}"
             self.pages[sid] = {"page": page, "last_used": time.time()}
             return page
 
@@ -86,6 +87,7 @@ class BrowserPool:
 
 _pool: BrowserPool | None = None
 
+
 def get_pool() -> BrowserPool:
     global _pool
     if _pool is None:
@@ -118,21 +120,29 @@ def handle_browser_request(request: dict[str, Any]) -> dict[str, Any]:
                 page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
                 screenshot = _take_screenshot(page)
                 clickable = _get_clickable_elements(page)
-                results.append({
-                    "action": "goto",
-                    "title": page.title(),
-                    "url": page.url,
-                    "text_content": page.inner_text("body")[:10000],
-                    "screenshot_base64": screenshot,
-                    "clickable_elements": clickable,
-                })
+                results.append(
+                    {
+                        "action": "goto",
+                        "title": page.title(),
+                        "url": page.url,
+                        "text_content": page.inner_text("body")[:10000],
+                        "screenshot_base64": screenshot,
+                        "clickable_elements": clickable,
+                    }
+                )
 
             elif act == "click":
                 selector = action.get("selector", "")
                 page.click(selector, timeout=5000)
                 page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
                 screenshot = _take_screenshot(page)
-                results.append({"action": "click", "selector": selector, "screenshot_base64": screenshot})
+                results.append(
+                    {
+                        "action": "click",
+                        "selector": selector,
+                        "screenshot_base64": screenshot,
+                    }
+                )
 
             elif act == "type":
                 selector = action.get("selector", "")
@@ -184,12 +194,14 @@ def _get_clickable_elements(page: Any, max_elements: int = 50) -> list[dict[str,
             bbox = el.bounding_box()
             if not bbox or bbox["width"] == 0 or bbox["height"] == 0:
                 continue
-            result.append({
-                "tag": el.evaluate("e => e.tagName.toLowerCase()"),
-                "text": (el.inner_text() or "")[:100],
-                "href": el.get_attribute("href") or "",
-                "bbox": bbox,
-            })
+            result.append(
+                {
+                    "tag": el.evaluate("e => e.tagName.toLowerCase()"),
+                    "text": (el.inner_text() or "")[:100],
+                    "href": el.get_attribute("href") or "",
+                    "bbox": bbox,
+                }
+            )
         except Exception:
             continue
     return result

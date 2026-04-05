@@ -1,4 +1,5 @@
 """Tests for parameter injection prevention (Task 0 security fix)."""
+
 import json
 import sys
 import os
@@ -31,7 +32,7 @@ def teardown_module(module):
 
 def get_free_port():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(('', 0))
+    s.bind(("", 0))
     port = s.getsockname()[1]
     s.close()
     return port
@@ -40,6 +41,7 @@ def get_free_port():
 class TestParamInjection:
     def test_tg_get_blocks_type_injection(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
@@ -47,12 +49,17 @@ class TestParamInjection:
         def capture_send(m, req):
             sent_data.update(req)
 
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/tg?action=get_dialogs&type=http&url=http://169.254.169.254/".format(port), timeout=5)
+            urlopen(
+                f"http://127.0.0.1:{port}/tg?action=get_dialogs&type=http&url=http://169.254.169.254/",
+                timeout=5,
+            )
 
         assert sent_data.get("type") == "command", "type should be 'command', not injected value"
         assert "url" not in sent_data, "url should not be forwarded"
@@ -60,6 +67,7 @@ class TestParamInjection:
 
     def test_tg_get_blocks_service_injection(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
@@ -67,12 +75,17 @@ class TestParamInjection:
         def capture_send(m, req):
             sent_data.update(req)
 
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/tg?action=get_dialogs&service=browser&method=GET".format(port), timeout=5)
+            urlopen(
+                f"http://127.0.0.1:{port}/tg?action=get_dialogs&service=browser&method=GET",
+                timeout=5,
+            )
 
         assert sent_data.get("service") == "telegram", "service should be 'telegram', not injected"
         assert "method" not in sent_data, "method should not be forwarded"
@@ -80,6 +93,7 @@ class TestParamInjection:
 
     def test_tg_get_allows_whitelisted_keys(self):
         import ioe_web
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
@@ -87,12 +101,17 @@ class TestParamInjection:
         def capture_send(m, req):
             sent_data.update(req)
 
-        with patch.object(handler, 'imap_conn') as mock_conn, \
-             patch.object(handler, 'send_request', side_effect=capture_send):
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            urlopen("http://127.0.0.1:{}/tg?action=get_messages&chat_id=123&limit=20".format(port), timeout=5)
+            urlopen(
+                f"http://127.0.0.1:{port}/tg?action=get_messages&chat_id=123&limit=20",
+                timeout=5,
+            )
 
         assert sent_data.get("chat_id") == 123
         assert sent_data.get("limit") == 20
@@ -101,6 +120,7 @@ class TestParamInjection:
     def test_tg_post_blocks_type_injection(self):
         import ioe_web
         import transport as transport_mod
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
@@ -108,17 +128,28 @@ class TestParamInjection:
         def capture_send(m, req):
             sent_data.update(req)
 
-        with patch.object(handler, 'imap_conn') as mc1, \
-             patch.object(handler, 'send_request', side_effect=capture_send), \
-             patch.object(transport_mod, 'imap_conn') as mc2, \
-             patch.object(transport_mod, 'send_request', side_effect=capture_send):
+        with (
+            patch.object(handler, "imap_conn") as mc1,
+            patch.object(handler, "send_request", side_effect=capture_send),
+            patch.object(transport_mod, "imap_conn") as mc2,
+            patch.object(transport_mod, "send_request", side_effect=capture_send),
+        ):
             mc1.return_value = MagicMock()
             mc2.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            body = json.dumps({"action": "get_dialogs", "type": "http", "url": "http://169.254.169.254/"}).encode()
-            req = Request("http://127.0.0.1:{}/tg".format(port), data=body,
-                         headers={"Content-Type": "application/json"})
+            body = json.dumps(
+                {
+                    "action": "get_dialogs",
+                    "type": "http",
+                    "url": "http://169.254.169.254/",
+                }
+            ).encode()
+            req = Request(
+                f"http://127.0.0.1:{port}/tg",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
             urlopen(req, timeout=5)
 
         assert sent_data.get("type") == "command"
@@ -128,6 +159,7 @@ class TestParamInjection:
     def test_login_tg_post_blocks_type_injection(self):
         import ioe_web
         import transport as transport_mod
+
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         sent_data = {}
@@ -135,19 +167,31 @@ class TestParamInjection:
         def capture_send(m, req):
             sent_data.update(req)
 
-        with patch.object(handler, 'imap_conn') as mc1, \
-             patch.object(handler, 'send_request', side_effect=capture_send), \
-             patch.object(transport_mod, 'imap_conn') as mc2, \
-             patch.object(transport_mod, 'send_request', side_effect=capture_send), \
-             patch.object(auth, 'is_whitelisted', return_value=True), \
-             patch.object(auth, 'check_rate_limit', return_value=True):
+        with (
+            patch.object(handler, "imap_conn") as mc1,
+            patch.object(handler, "send_request", side_effect=capture_send),
+            patch.object(transport_mod, "imap_conn") as mc2,
+            patch.object(transport_mod, "send_request", side_effect=capture_send),
+            patch.object(auth, "is_whitelisted", return_value=True),
+            patch.object(auth, "check_rate_limit", return_value=True),
+        ):
             mc1.return_value = MagicMock()
             mc2.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            body = json.dumps({"action": "auth_start", "phone": "+79991234567", "type": "http", "url": "http://169.254.169.254/"}).encode()
-            req = Request("http://127.0.0.1:{}/login/tg".format(port), data=body,
-                         headers={"Content-Type": "application/json"})
+            body = json.dumps(
+                {
+                    "action": "auth_start",
+                    "phone": "+79991234567",
+                    "type": "http",
+                    "url": "http://169.254.169.254/",
+                }
+            ).encode()
+            req = Request(
+                f"http://127.0.0.1:{port}/login/tg",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
             urlopen(req, timeout=5)
 
         assert sent_data.get("type") == "command", "type should be 'command' in login/tg POST"

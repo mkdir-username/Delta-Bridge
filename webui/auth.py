@@ -1,4 +1,5 @@
 """Authentication: phone whitelist, httponly sessions, rate limiting, email OTP."""
+
 from __future__ import annotations
 import os
 import json
@@ -13,7 +14,7 @@ import sys
 from email.mime.text import MIMEText as _MIMEText
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from ioe_types import SessionData, OTPEntry, WhitelistEntry, Whitelist, SessionStore, RateStore  # noqa: E402
+from ioe_types import OTPEntry, Whitelist, SessionStore, RateStore  # noqa: E402
 
 log = logging.getLogger("ioe.auth")
 
@@ -112,6 +113,7 @@ def is_whitelisted(phone: str) -> bool:
 
 def verify_password(phone: str, password: str) -> bool:
     import bcrypt
+
     phone = _normalize_phone(phone)
     entry = _whitelist.get(phone)
     if not entry or not isinstance(entry, dict):
@@ -124,12 +126,17 @@ def verify_password(phone: str, password: str) -> bool:
 
 def hash_password(password: str) -> str:
     import bcrypt
+
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def create_session(user_id: str) -> str:
     sid = secrets.token_hex(32)
-    _sessions[sid] = {"user_id": user_id, "created": time.time(), "last_seen": time.time()}
+    _sessions[sid] = {
+        "user_id": user_id,
+        "created": time.time(),
+        "last_seen": time.time(),
+    }
     _save_sessions()
     log.info("Session created for %s (sid=%s...)", user_id, sid[:8])
     return sid
@@ -237,11 +244,11 @@ def mask_email(email: str | None) -> str | None:
         masked = local[0] + "***"
     else:
         masked = local[0] + "***" + local[-1]
-    return "{}@{}".format(masked, domain)
+    return f"{masked}@{domain}"
 
 
 def create_otp(phone: str, ip: str | None = None) -> str:
-    code = "{:06d}".format(secrets.randbelow(1000000))
+    code = f"{secrets.randbelow(1000000):06d}"
     with _otp_lock:
         _otp_store[_normalize_phone(phone)] = {
             "code": code,
@@ -270,7 +277,7 @@ def verify_otp(phone: str, code: str, ip: str | None = None) -> bool:
 
 
 def send_otp_email(to_email: str, code: str, from_email: str, smtp_password: str) -> None:
-    msg = _MIMEText("Kod vhoda IoE: {}".format(code), "plain", "utf-8")
+    msg = _MIMEText(f"Kod vhoda IoE: {code}", "plain", "utf-8")
     msg["Subject"] = "IoE: kod vhoda"
     msg["From"] = from_email
     msg["To"] = to_email

@@ -1,4 +1,5 @@
-import sys, os
+import sys
+import os
 
 _root = os.path.dirname(os.path.dirname(__file__))
 if os.path.join(_root, "client") not in sys.path:
@@ -6,6 +7,7 @@ if os.path.join(_root, "client") not in sys.path:
 
 import json
 from kit_runner import KitRunner
+
 
 class TestKitRunnerBasic:
     def test_unknown_action(self):
@@ -15,9 +17,11 @@ class TestKitRunnerBasic:
 
     def test_http_step_calls_proxy(self):
         calls = []
+
         def mock_proxy(req):
             calls.append(req)
             return {"status_code": 200, "body": "ok"}
+
         runner = KitRunner(mock_proxy)
         kit = {"actions": {"test": {"steps": [{"type": "http", "method": "GET", "url": "https://example.com"}]}}}
         runner.run(kit, "test")
@@ -30,11 +34,22 @@ class TestKitRunnerBasic:
         assert runner._interpolate("https://api.com/item/{id}") == "https://api.com/item/123"
 
     def test_extract_json_slice(self):
-        runner = KitRunner(lambda r: {"body": json.dumps([1,2,3,4,5])})
-        kit = {"actions": {"t": {"steps": [
-            {"type": "http", "method": "GET", "url": "https://x.com"},
-            {"type": "extract", "source": "body", "path": "$[:3]", "as": "items"}
-        ]}}}
+        runner = KitRunner(lambda r: {"body": json.dumps([1, 2, 3, 4, 5])})
+        kit = {
+            "actions": {
+                "t": {
+                    "steps": [
+                        {"type": "http", "method": "GET", "url": "https://x.com"},
+                        {
+                            "type": "extract",
+                            "source": "body",
+                            "path": "$[:3]",
+                            "as": "items",
+                        },
+                    ]
+                }
+            }
+        }
         result = runner.run(kit, "t")
         assert result["variables"]["items"] == [1, 2, 3]
 
@@ -47,22 +62,52 @@ class TestKitRunnerBasic:
 
     def test_extract_field(self):
         runner = KitRunner(lambda r: {"body": json.dumps({"title": "Hello"})})
-        kit = {"actions": {"t": {"steps": [
-            {"type": "http", "method": "GET", "url": "https://x.com"},
-            {"type": "extract", "source": "body", "path": "$.title", "as": "name"}
-        ]}}}
+        kit = {
+            "actions": {
+                "t": {
+                    "steps": [
+                        {"type": "http", "method": "GET", "url": "https://x.com"},
+                        {
+                            "type": "extract",
+                            "source": "body",
+                            "path": "$.title",
+                            "as": "name",
+                        },
+                    ]
+                }
+            }
+        }
         assert runner.run(kit, "t")["variables"]["name"] == "Hello"
+
 
 class TestKitRunnerLoop:
     def test_loop_iterates(self):
         n = [0]
-        runner = KitRunner(lambda r: (n.__setitem__(0, n[0]+1), {"body": "{}"})[1])
+        runner = KitRunner(lambda r: (n.__setitem__(0, n[0] + 1), {"body": "{}"})[1])
         runner.variables = {"ids": [10, 20, 30]}
-        kit = {"actions": {"a": {"steps": [{"type": "loop", "over": "{ids}", "as": "id", "steps": [
-            {"type": "http", "method": "GET", "url": "https://api.com/{id}"}
-        ]}]}}}
+        kit = {
+            "actions": {
+                "a": {
+                    "steps": [
+                        {
+                            "type": "loop",
+                            "over": "{ids}",
+                            "as": "id",
+                            "steps": [
+                                {
+                                    "type": "http",
+                                    "method": "GET",
+                                    "url": "https://api.com/{id}",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
         runner.run(kit, "a")
         assert n[0] == 3
+
 
 class TestHackerNewsKit:
     def test_kit_loads(self):

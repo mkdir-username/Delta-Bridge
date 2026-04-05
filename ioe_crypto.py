@@ -1,4 +1,5 @@
 """IoE E2E encryption: AES-256-GCM with shared secret."""
+
 from __future__ import annotations
 
 import base64

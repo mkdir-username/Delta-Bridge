@@ -21,11 +21,16 @@ class ClaudeChat:
 
     def send_message(self, user_id: str, text: str, model: str | None = None) -> dict[str, Any]:
         cmd = [
-            CLAUDE_BIN, "-p", text,
-            "--output-format", "json",
+            CLAUDE_BIN,
+            "-p",
+            text,
+            "--output-format",
+            "json",
             "--bare",
-            "--model", model or DEFAULT_MODEL,
-            "--max-budget-usd", str(MAX_BUDGET_USD),
+            "--model",
+            model or DEFAULT_MODEL,
+            "--max-budget-usd",
+            str(MAX_BUDGET_USD),
         ]
         with self._lock:
             sid = self._sessions.get(user_id)
@@ -33,12 +38,12 @@ class ClaudeChat:
             cmd.extend(["--resume", sid])
 
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True,
-                timeout=CLAUDE_TIMEOUT, cwd="/tmp"
-            )
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT, cwd="/tmp")
             if proc.returncode != 0:
-                return {"error": proc.stderr.strip() or "claude exited with error", "exit_code": proc.returncode}
+                return {
+                    "error": proc.stderr.strip() or "claude exited with error",
+                    "exit_code": proc.returncode,
+                }
 
             result = json.loads(proc.stdout)
             new_sid = result.get("session_id", sid)
@@ -57,7 +62,7 @@ class ClaudeChat:
                 "model": model_name,
             }
         except subprocess.TimeoutExpired:
-            return {"error": "timeout ({}s)".format(CLAUDE_TIMEOUT)}
+            return {"error": f"timeout ({CLAUDE_TIMEOUT}s)"}
         except json.JSONDecodeError:
             return {"response": proc.stdout, "session_id": sid}
         except FileNotFoundError:
@@ -67,7 +72,9 @@ class ClaudeChat:
         try:
             proc = subprocess.run(
                 [CLAUDE_BIN, "auth", "status"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if proc.returncode == 0:
                 data = json.loads(proc.stdout)

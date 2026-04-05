@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Add a phone number to users.json whitelist."""
+
 from __future__ import annotations
 
 import sys

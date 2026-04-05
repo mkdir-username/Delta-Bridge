@@ -1,4 +1,5 @@
 """Telegram adapter: Telethon wrapper for IoE commands."""
+
 from __future__ import annotations
 
 import os
@@ -6,22 +7,32 @@ import asyncio
 import logging
 import threading
 import time
-from datetime import datetime
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 log = logging.getLogger("ioe.telegram")
 
 try:
     from telethon import TelegramClient
-    from telethon.tl.functions.messages import GetDialogsRequest, ReadHistoryRequest
-    from telethon.errors import AuthKeyUnregisteredError, SessionPasswordNeededError, PhoneCodeInvalidError, FloodWaitError
+    from telethon.errors import (
+        AuthKeyUnregisteredError,
+        SessionPasswordNeededError,
+        PhoneCodeInvalidError,
+        FloodWaitError,
+    )
+
     TELETHON_AVAILABLE = True
 except ImportError:
     TELETHON_AVAILABLE = False
 
 
 class TelegramAdapter:
-    def __init__(self, api_id: int | None = None, api_hash: str | None = None, session_path: str | None = None) -> None:
+    def __init__(
+        self,
+        api_id: int | None = None,
+        api_hash: str | None = None,
+        session_path: str | None = None,
+    ) -> None:
         if not TELETHON_AVAILABLE:
             raise ImportError("telethon not installed")
         self.api_id: int = api_id or int(os.environ.get("TG_API_ID", "0"))
@@ -51,7 +62,7 @@ class TelegramAdapter:
 
     def _get_client(self, user_id: str) -> Any:
         if user_id not in self.clients:
-            session_path = "ioe_telegram_{}".format(user_id)
+            session_path = f"ioe_telegram_{user_id}"
             client = TelegramClient(session_path, self.api_id, self.api_hash, loop=self.loop)
             self._run_sync(client.connect())
             self.clients[user_id] = client
@@ -93,7 +104,11 @@ class TelegramAdapter:
         except AuthKeyUnregisteredError:
             log.warning("Session invalid for user %s, purging client", user_id)
             self.clients.pop(user_id, None)
-            return {"status": 401, "auth_required": True, "error": "session expired, re-auth needed"}
+            return {
+                "status": 401,
+                "auth_required": True,
+                "error": "session expired, re-auth needed",
+            }
         except Exception as e:
             log.error("Telegram action %s failed: %s", action, e)
             return {"status": 500, "error": str(e)}
@@ -113,9 +128,9 @@ class TelegramAdapter:
 
         async def _on_new_message(event: Any) -> None:
             sender = await event.get_sender()
-            sender_name = getattr(sender, 'first_name', '') or str(getattr(sender, 'id', ''))
+            sender_name = getattr(sender, "first_name", "") or str(getattr(sender, "id", ""))
             chat = await event.get_chat()
-            chat_name = getattr(chat, 'title', '') or getattr(chat, 'first_name', '') or str(chat.id)
+            chat_name = getattr(chat, "title", "") or getattr(chat, "first_name", "") or str(chat.id)
             notification = {
                 "type": "notification",
                 "service": "telegram",
@@ -129,6 +144,7 @@ class TelegramAdapter:
             _rate_limited_callback(notification)
 
         from telethon import events
+
         client.add_event_handler(_on_new_message, events.NewMessage(incoming=True))
         log.info("Telegram listener started for user_id=%s", user_id)
 
@@ -141,22 +157,24 @@ class TelegramAdapter:
             for d in dialogs:
                 entity = d.entity
                 dtype = "user"
-                if hasattr(entity, 'megagroup') and entity.megagroup:
+                if hasattr(entity, "megagroup") and entity.megagroup:
                     dtype = "group"
-                elif hasattr(entity, 'broadcast') and entity.broadcast:
+                elif hasattr(entity, "broadcast") and entity.broadcast:
                     dtype = "channel"
-                elif hasattr(entity, 'title'):
+                elif hasattr(entity, "title"):
                     dtype = "group"
-                result.append({
-                    "id": d.id,
-                    "name": d.name or "",
-                    "unread": d.unread_count,
-                    "last_message": d.message.text if d.message else "",
-                    "date": d.date.isoformat() if d.date else "",
-                    "type": dtype,
-                    "archived": d.archived,
-                    "pinned": d.pinned,
-                })
+                result.append(
+                    {
+                        "id": d.id,
+                        "name": d.name or "",
+                        "unread": d.unread_count,
+                        "last_message": d.message.text if d.message else "",
+                        "date": d.date.isoformat() if d.date else "",
+                        "type": dtype,
+                        "archived": d.archived,
+                        "pinned": d.pinned,
+                    }
+                )
             return result
 
         dialogs = self._run_sync(_fetch())
@@ -167,10 +185,7 @@ class TelegramAdapter:
 
         async def _fetch() -> list[dict[str, int | str]]:
             dialogs = await client.get_dialogs(limit=limit)
-            return [
-                {"id": d.id, "name": d.name or "", "unread": d.unread_count}
-                for d in dialogs if d.unread_count > 0
-            ]
+            return [{"id": d.id, "name": d.name or "", "unread": d.unread_count} for d in dialogs if d.unread_count > 0]
 
         unread = self._run_sync(_fetch())
         return {"unread_chats": unread}
@@ -252,7 +267,11 @@ class TelegramAdapter:
         async def _do_search() -> list[dict[str, Any]]:
             messages = await client.get_messages(chat_id, search=query, limit=limit)
             return [
-                {"id": m.id, "text": m.text or "", "date": m.date.isoformat() if m.date else ""}
+                {
+                    "id": m.id,
+                    "text": m.text or "",
+                    "date": m.date.isoformat() if m.date else "",
+                }
                 for m in messages
             ]
 

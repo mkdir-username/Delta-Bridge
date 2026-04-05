@@ -1,4 +1,5 @@
 """IoE CLI client v2: folder-based, steganographic, AES-256-GCM."""
+
 from __future__ import annotations
 from typing import Any
 import os
@@ -25,9 +26,18 @@ IMAP_HOST = "imap.yandex.ru"
 QUEUE_FOLDER = "IoE"
 
 SUBJECTS = [
-    "Re: Встреча", "Fw: Документы", "Отчёт", "Заказ",
-    "Фото", "Бронирование", "Напоминание", "Чек",
-    "Re: Вопрос", "Fw: Счёт", "Расписание", "Доставка",
+    "Re: Встреча",
+    "Fw: Документы",
+    "Отчёт",
+    "Заказ",
+    "Фото",
+    "Бронирование",
+    "Напоминание",
+    "Чек",
+    "Re: Вопрос",
+    "Fw: Счёт",
+    "Расписание",
+    "Доставка",
 ]
 FILENAMES = ["report.pdf", "scan.pdf", "doc.pdf", "invoice.pdf", "notes.pdf"]
 BODIES = ["", "см. вложение", "Документ", "Во вложении"]
@@ -50,8 +60,7 @@ def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> str:
     part = MIMEBase("application", "pdf")
     part.set_payload(encrypted)
     encoders.encode_base64(part)
-    part.add_header("Content-Disposition", "attachment",
-                    filename=random.choice(FILENAMES))
+    part.add_header("Content-Disposition", "attachment", filename=random.choice(FILENAMES))
     msg.attach(part)
     m.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
     return str(request_dict["id"])
@@ -126,6 +135,7 @@ def main() -> None:
         if response.get("status") == 200:
             if response.get("cmd") == "UPDATE":
                 import shutil
+
                 files = response.get("files", {})
                 for fname, content in files.items():
                     target = os.path.expanduser(f"~/{fname}")
@@ -142,8 +152,8 @@ def main() -> None:
                 body = response.get("body", "")
                 if "<" in body and ">" in body:
                     from bs4 import BeautifulSoup
-                    print(BeautifulSoup(body, "html.parser").get_text(
-                        separator="\n", strip=True))
+
+                    print(BeautifulSoup(body, "html.parser").get_text(separator="\n", strip=True))
                 else:
                     print(body)
         else:
