@@ -262,3 +262,40 @@ class TestPollResponseErrors:
         assert "something broke" in classify_calls
         key = ("user1", req_id)
         assert ioe_web.pending[key]["error"] == "classified error"
+
+    def test_stale_response_uids_cleaned_when_own_found(self):
+        """При нахождении своего ответа — удаляются ВСЕ расшифрованные response UIDs."""
+        req_id = "req-cleanup"
+        my_response = {"id": req_id, "status": 200, "body": "ok"}
+        stale_response = {"id": "old-req-999", "status": 200, "body": "stale"}
+
+        raw_mine = _make_encrypted_email(my_response)
+        raw_stale = _make_encrypted_email(stale_response)
+
+        mock_imap = MagicMock()
+        mock_imap.select.return_value = ("OK", [b"INBOX"])
+        mock_imap.noop.return_value = ("OK", [])
+        mock_imap.search.return_value = ("OK", [b"10 20"])
+        mock_imap.fetch.side_effect = lambda uid, _: (
+            "OK",
+            [(uid, raw_mine if uid == b"10" else raw_stale)],
+        )
+        mock_imap.store.return_value = ("OK", [])
+        mock_imap.expunge.return_value = ("OK", [])
+        mock_imap.logout.return_value = None
+        time_values = [0.0] * 200
+
+        with (
+            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch("time.sleep"),
+            patch("time.time", side_effect=time_values),
+        ):
+            transport.poll_response("user1", req_id)
+
+        key = ("user1", req_id)
+        assert key in ioe_web.pending
+
+        store_calls = [c[0] for c in mock_imap.store.call_args_list]
+        deleted_uids = {c[0] for c in store_calls}
+        assert b"10" in deleted_uids, "own UID must be deleted"
+        assert b"20" in deleted_uids, "stale response UID must also be deleted"
