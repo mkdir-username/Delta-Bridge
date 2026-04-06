@@ -44,8 +44,11 @@ class TestClient:
         args = mock_imap.append.call_args[0]
         assert args[0] == client.QUEUE_FOLDER
         parsed = email_mod.message_from_bytes(args[3])
-        has_pdf = any(p.get_content_type() == "application/pdf" for p in parsed.walk())
-        assert has_pdf
+        valid_types = {"application/pdf", "application/octet-stream", "application/x-compressed"}
+        has_attachment = any(
+            p.get_content_disposition() == "attachment" and p.get_content_type() in valid_types for p in parsed.walk()
+        )
+        assert has_attachment
 
     def test_extract_attachment_returns_payload(self):
         from email.mime.multipart import MIMEMultipart

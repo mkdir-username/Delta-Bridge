@@ -3,6 +3,7 @@
 import json
 import sys
 import os
+import types
 import threading
 from urllib.request import urlopen
 from unittest.mock import patch, MagicMock
@@ -12,6 +13,10 @@ import socket
 _root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_root, "webui"))
 sys.path.insert(0, os.path.dirname(__file__))
+
+if "imapclient" not in sys.modules:
+    sys.modules["imapclient"] = types.ModuleType("imapclient")
+    sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "pass")
 os.environ.setdefault("IOE_SECRET", "secret123")
@@ -515,8 +520,8 @@ class TestNotifications:
         notif_msg = {"type": "notification", "service": "telegram", "text": "new msg"}
         normal_resp = {"id": "req123", "status": 200, "body": "ok"}
 
-        encrypted_notif = transport.encrypt(ioe_web.IOE_KEY, json.dumps(notif_msg))
-        encrypted_resp = transport.encrypt(ioe_web.IOE_KEY, json.dumps(normal_resp))
+        encrypted_notif = transport.compress_encrypt(ioe_web.IOE_KEY, json.dumps(notif_msg))
+        encrypted_resp = transport.compress_encrypt(ioe_web.IOE_KEY, json.dumps(normal_resp))
 
         from email.mime.multipart import MIMEMultipart
         from email.mime.base import MIMEBase
@@ -536,13 +541,15 @@ class TestNotifications:
         raw_resp = make_raw(encrypted_resp)
 
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1 2"])
-        mock_imap.fetch.side_effect = lambda uid, _: (
-            "OK",
-            [(uid, raw_notif if uid == b"2" else raw_resp)],
-        )
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = [1, 2]
+        mock_imap.fetch.side_effect = lambda uids, _: {
+            uid: {b"RFC822": raw_notif if uid == 2 else raw_resp} for uid in uids
+        }
+        mock_imap.set_flags.return_value = {}
+        mock_imap.expunge.return_value = None
+        mock_imap.logout.return_value = None
 
         with (
             patch.object(transport, "imap_conn", return_value=mock_imap),
