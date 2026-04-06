@@ -162,8 +162,21 @@ def handle_browser_request(request: dict[str, Any]) -> dict[str, Any]:
             elif act == "extract":
                 selector = action.get("selector", "body")
                 elements = page.query_selector_all(selector)
-                texts = [el.inner_text() for el in elements[:50]]
-                results.append({"action": "extract", "selector": selector, "texts": texts})
+                items = []
+                for el in elements[:50]:
+                    item: dict[str, str] = {"text": el.inner_text()}
+                    href = el.get_attribute("href")
+                    if href:
+                        item["href"] = href
+                    items.append(item)
+                results.append(
+                    {
+                        "action": "extract",
+                        "selector": selector,
+                        "texts": [it["text"] for it in items],
+                        "elements": items,
+                    }
+                )
 
             elif act == "wait":
                 selector = action.get("selector", "")
