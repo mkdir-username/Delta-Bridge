@@ -1,4 +1,5 @@
 """FakeIMAPClient — drop-in for imapclient.IMAPClient in e2e tests."""
+
 from __future__ import annotations
 
 import imaplib

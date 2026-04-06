@@ -1,4 +1,5 @@
 """E2E tests for server.main() loop — zombie prevention, reconnect, normal flow."""
+
 from __future__ import annotations
 
 import json
@@ -42,9 +43,7 @@ sys.modules["PIL.Image"] = sys.modules["PIL"]
 sys.modules["PIL"].Image = sys.modules["PIL"]
 sys.modules["requests"].get = lambda *a, **kw: None
 sys.modules["requests"].request = lambda *a, **kw: None
-sys.modules["requests"].Session = type(
-    "Session", (), {"request": lambda *a, **kw: None, "close": lambda self: None}
-)
+sys.modules["requests"].Session = type("Session", (), {"request": lambda *a, **kw: None, "close": lambda self: None})
 sys.modules["trafilatura"].extract = lambda html, **kw: None
 
 os.environ.setdefault("EMAIL", "test@test.com")
@@ -73,6 +72,7 @@ def _make_mime(payload_dict: dict) -> bytes:
 
 class _TickLimitReached(SystemExit):
     """Raised by patched time.sleep to stop main() after N ticks."""
+
     pass
 
 
