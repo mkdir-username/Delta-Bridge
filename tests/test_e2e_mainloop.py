@@ -99,7 +99,7 @@ def _run_main(
         try:
             return next(client_iter)
         except StopIteration:
-            raise _TickLimitReached(0)
+            raise _TickLimitReached(0) from None
 
     def fake_sleep(seconds: float) -> None:
         nonlocal tick_count
