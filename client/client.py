@@ -16,7 +16,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from ioe_crypto import derive_key, encrypt, decrypt
+from ioe_crypto import derive_key, compress_encrypt, decrypt_decompress
 
 EMAIL: str = os.environ["EMAIL"]
 PASSWORD: str = os.environ["IMAP_PASSWORD"]
@@ -51,13 +51,20 @@ def imap_conn() -> imaplib.IMAP4_SSL:
 
 def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> str:
     payload = json.dumps(request_dict)
-    encrypted = encrypt(IOE_KEY, payload).encode("ascii")
-    msg = MIMEMultipart()
+    encrypted = compress_encrypt(IOE_KEY, payload).encode("ascii")
+    subtype = random.choice(["mixed", "alternative", "related"])
+    msg = MIMEMultipart(subtype)
     msg["Subject"] = f"{random.choice(SUBJECTS)} {uuid.uuid4().hex[:8]}"
     msg["From"] = EMAIL
     msg["To"] = EMAIL
-    msg.attach(MIMEText(random.choice(BODIES), "plain", "utf-8"))
-    part = MIMEBase("application", "pdf")
+    if random.random() < 0.3:
+        msg["Reply-To"] = EMAIL
+    body_text = random.choice(BODIES)
+    if body_text:
+        body_text += " " * random.randint(0, 200)
+    msg.attach(MIMEText(body_text, "plain", "utf-8"))
+    app_type = random.choice([("application", "pdf"), ("application", "octet-stream"), ("application", "x-compressed")])
+    part = MIMEBase(app_type[0], app_type[1])
     part.set_payload(encrypted)
     encoders.encode_base64(part)
     part.add_header("Content-Disposition", "attachment", filename=random.choice(FILENAMES))
@@ -96,7 +103,7 @@ def wait_response(m: imaplib.IMAP4_SSL, req_id: str, timeout: int = 90) -> dict[
             if att is None:
                 continue
             try:
-                decrypted = decrypt(IOE_KEY, att.decode("ascii").strip())
+                decrypted = decrypt_decompress(IOE_KEY, att.decode("ascii").strip())
                 response: dict[str, Any] = json.loads(decrypted)
                 if response.get("id") == req_id:
                     return response

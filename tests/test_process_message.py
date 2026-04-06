@@ -47,7 +47,7 @@ os.environ.setdefault("IMAP_PASSWORD", "test")
 os.environ.setdefault("IOE_SECRET", "test-secret-key")
 
 import server
-from ioe_crypto import encrypt, decrypt, derive_key
+from ioe_crypto import encrypt, decrypt_decompress, derive_key
 
 IOE_KEY = derive_key(os.environ["IOE_SECRET"])
 
@@ -131,7 +131,7 @@ class TestProcessMessage:
             payload = part.get_payload(decode=True)
             if payload:
                 try:
-                    decrypted = decrypt(IOE_KEY, payload.decode("ascii").strip())
+                    decrypted = decrypt_decompress(IOE_KEY, payload.decode("ascii").strip())
                     data = json.loads(decrypted)
                     if "status" in data:
                         assert data["status"] == 500

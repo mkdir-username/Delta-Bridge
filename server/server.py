@@ -35,7 +35,6 @@ import requests
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from ioe_crypto import (
     derive_key,
-    encrypt,
     decrypt,
     compress_encrypt,
     decrypt_decompress,
@@ -262,14 +261,38 @@ def check_rate_limit(user_id: str = "default") -> None:
     ts.append(now)
 
 
+MIME_SUBTYPES = ["mixed", "alternative", "related"]
+ATTACHMENT_TYPES = [
+    ("application", "pdf"),
+    ("application", "octet-stream"),
+    ("application", "x-compressed"),
+]
+OPTIONAL_HEADERS: list[tuple[str, str]] = [
+    ("CC", EMAIL),
+    ("Reply-To", EMAIL),
+    ("In-Reply-To", f"<{uuid.uuid4().hex[:12]}@yandex.ru>"),
+    ("References", f"<{uuid.uuid4().hex[:12]}@yandex.ru>"),
+]
+
+
 def make_envelope(encrypted_bytes: bytes) -> MIMEMultipart:
-    msg = MIMEMultipart()
+    subtype = random.choice(MIME_SUBTYPES)
+    msg = MIMEMultipart(subtype)
     msg["Subject"] = f"{random.choice(SUBJECTS)} {uuid.uuid4().hex[:8]}"
     msg["From"] = EMAIL
     msg["To"] = EMAIL
     msg["Date"] = email.utils.formatdate(localtime=True)
-    msg.attach(MIMEText(random.choice(BODIES), "plain", "utf-8"))
-    part = MIMEBase("application", "pdf")
+    for hdr, val in OPTIONAL_HEADERS:
+        if random.random() < 0.3:
+            if hdr in ("In-Reply-To", "References"):
+                val = f"<{uuid.uuid4().hex[:12]}@yandex.ru>"
+            msg[hdr] = val
+    body_text = random.choice(BODIES)
+    if body_text:
+        body_text += " " * random.randint(0, 200)
+    msg.attach(MIMEText(body_text, "plain", "utf-8"))
+    app_type, app_subtype = random.choice(ATTACHMENT_TYPES)
+    part = MIMEBase(app_type, app_subtype)
     part.set_payload(encrypted_bytes)
     encoders.encode_base64(part)
     part.add_header("Content-Disposition", "attachment", filename=random.choice(FILENAMES))
@@ -278,13 +301,16 @@ def make_envelope(encrypted_bytes: bytes) -> MIMEMultipart:
 
 
 def append_response(client: Any, response_dict: dict[str, Any]) -> None:
+    from ioe_telemetry import Timer
+
     rid = response_dict.get("id", "?")
     log.debug("append_response: id=%s status=%s", rid, response_dict.get("status", "?"))
     payload = json.dumps(response_dict, ensure_ascii=False)
-    encrypted = encrypt(IOE_KEY, payload).encode("ascii")
+    encrypted = compress_encrypt(IOE_KEY, payload).encode("ascii")
     msg = make_envelope(encrypted)
-    client.append("INBOX", msg.as_bytes())
-    log.info("append_response: APPEND OK id=%s", rid)
+    with Timer() as t_append:
+        client.append("INBOX", msg.as_bytes())
+    log.info("append_response: APPEND OK id=%s (%.0fms, %d bytes)", rid, t_append.elapsed_ms, len(encrypted))
 
 
 def fetch_text(url: str) -> str:
@@ -983,8 +1009,19 @@ def main() -> None:
                             iteration,
                         )
                         break
-                    client.noop()
-                    log.debug("noop ok (iter=%d, age=%.0fs)", iteration, age)
+                    idle_timeout = max(1, min(600, RECONNECT_INTERVAL - int(age)))
+                    client.idle()
+                    try:
+                        responses = client.idle_check(timeout=idle_timeout)
+                    except Exception as e:
+                        log.debug("IDLE interrupted: %s", e)
+                        try:
+                            client.idle_done()
+                        except Exception:
+                            pass
+                        break
+                    client.idle_done()
+
                     messages = client.search(["ALL"])
                     if messages:
                         log.info(
@@ -993,17 +1030,18 @@ def main() -> None:
                             messages[:10],
                             iteration,
                         )
-                    else:
-                        log.debug("mainloop: search empty (iter=%d, age=%.0fs)", iteration, age)
-                    for uid in messages:
-                        data = client.fetch([uid], ["RFC822"])
-                        raw = data[uid][b"RFC822"]
-                        processed = process_message(client, uid, raw)
-                        if processed:
-                            client.delete_messages([uid])
+                        all_data = client.fetch(messages, ["RFC822"])
+                        processed_uids = []
+                        for uid in messages:
+                            raw = all_data.get(uid, {}).get(b"RFC822")
+                            if raw is None:
+                                continue
+                            if process_message(client, uid, raw):
+                                processed_uids.append(uid)
+                        if processed_uids:
+                            client.delete_messages(processed_uids)
                             client.expunge()
-                            log.info("Deleted uid=%s from queue", uid)
-                    time.sleep(0.5)
+                            log.info("Deleted %d uids from queue: %s", len(processed_uids), processed_uids)
         except Exception as e:
             log.error("Connection error: %s, reconnecting in 5s", e)
             time.sleep(5)
