@@ -11,8 +11,6 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 import unittest
 
-import importlib.util
-
 _root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, _root)
 
@@ -27,9 +25,15 @@ os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "test")
 os.environ.setdefault("IOE_SECRET", "test-secret-key")
 
-_spec = importlib.util.spec_from_file_location("client_ioe_web", os.path.join(_root, "client", "ioe_web.py"))
-ioe_web = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(ioe_web)  # type: ignore[union-attr]
+_client_dir = os.path.join(_root, "client")
+sys.path.insert(0, _client_dir)
+import ioe_web as _client_ioe_web  # noqa: E402
+
+sys.path.remove(_client_dir)
+# Re-register under unique name to avoid collision with webui/ioe_web.py
+sys.modules["client_ioe_web"] = _client_ioe_web
+sys.modules.pop("ioe_web", None)
+ioe_web = _client_ioe_web
 
 
 def _make_email_with_attachment(payload: bytes) -> bytes:
@@ -151,9 +155,13 @@ def _make_handler(path: str, query: str = "") -> ioe_web.Handler:
     def end_headers() -> None:
         responses.append(("end_headers",))
 
+    def send_error(code: int, message: str = "") -> None:
+        responses.append(("error", code))
+
     handler.send_response = send_response
     handler.send_header = send_header
     handler.end_headers = end_headers
+    handler.send_error = send_error
     return handler
 
 
@@ -203,6 +211,193 @@ class TestHandlerDemo(unittest.TestCase):
         h._handle_demo("UNKNOWN", {}, "req3")
         resp = h.respond_json.call_args[0][0]
         assert resp["status"] == "error"
+
+
+class TestPollResponse(unittest.TestCase):
+    def _make_imap_with_response(self, req_id, response_dict):
+        """Create mock IMAP that returns an encrypted response on first search."""
+        from ioe_crypto import encrypt
+
+        encrypted = encrypt(ioe_web.IOE_KEY, json.dumps(response_dict)).encode("ascii")
+        raw_email = _make_email_with_attachment(encrypted)
+
+        mock_imap = MagicMock()
+        mock_imap.search.return_value = ("OK", [b"1"])
+        mock_imap.fetch.return_value = ("OK", [(b"1", raw_email)])
+        return mock_imap
+
+    @patch.object(ioe_web, "imap_conn")
+    @patch("time.sleep")
+    def test_response_found_updates_pending(self, mock_sleep, mock_conn):
+        req_id = "test-resp-1"
+        response = {"id": req_id, "status": 200, "title": "Hello", "body": "World"}
+        mock_conn.return_value = self._make_imap_with_response(req_id, response)
+
+        ioe_web.pending.pop(req_id, None)
+        ioe_web.poll_response(req_id)
+
+        assert req_id in ioe_web.pending
+        assert ioe_web.pending[req_id]["title"] == "Hello"
+        ioe_web.pending.pop(req_id, None)
+
+    @patch.object(ioe_web, "imap_conn")
+    @patch("time.sleep")
+    def test_notification_queued_and_deduped(self, mock_sleep, mock_conn):
+        from ioe_crypto import encrypt
+
+        notif = {"type": "notification", "service": "telegram", "text": "hi"}
+        encrypted = encrypt(ioe_web.IOE_KEY, json.dumps(notif)).encode("ascii")
+        raw_email = _make_email_with_attachment(encrypted)
+
+        mock_imap = MagicMock()
+        mock_imap.search.return_value = ("OK", [b"42"])
+        mock_imap.fetch.return_value = ("OK", [(b"42", raw_email)])
+        mock_conn.return_value = mock_imap
+
+        ioe_web.seen_notification_uids.discard("42")
+        ioe_web.notification_queues.pop("default", None)
+        ioe_web.pending.pop("notif-test", None)
+
+        ioe_web.poll_response("notif-test")
+
+        assert "default" in ioe_web.notification_queues
+        assert len(ioe_web.notification_queues["default"]) >= 1
+        assert ioe_web.notification_queues["default"][0]["type"] == "notification"
+        assert "42" in ioe_web.seen_notification_uids
+        # Cleanup
+        ioe_web.seen_notification_uids.discard("42")
+        ioe_web.notification_queues.pop("default", None)
+        ioe_web.pending.pop("notif-test", None)
+
+    @patch.object(ioe_web, "imap_conn")
+    @patch("time.sleep")
+    def test_timeout_sets_504(self, mock_sleep, mock_conn):
+        mock_imap = MagicMock()
+        mock_imap.search.return_value = ("OK", [b""])
+        mock_conn.return_value = mock_imap
+
+        ioe_web.pending.pop("timeout-test", None)
+        ioe_web.poll_response("timeout-test")
+
+        assert "timeout-test" in ioe_web.pending
+        assert ioe_web.pending["timeout-test"]["status"] == 504
+        ioe_web.pending.pop("timeout-test", None)
+
+    @patch.object(ioe_web, "imap_conn", side_effect=Exception("connection refused"))
+    def test_imap_error_sets_500(self, mock_conn):
+        ioe_web.pending.pop("err-test", None)
+        ioe_web.poll_response("err-test")
+
+        assert "err-test" in ioe_web.pending
+        assert ioe_web.pending["err-test"]["status"] == 500
+        assert "connection refused" in ioe_web.pending["err-test"]["error"]
+        ioe_web.pending.pop("err-test", None)
+
+
+class TestHandlerDoGET(unittest.TestCase):
+    def test_root_returns_html(self):
+        h = _make_handler("/")
+        h.do_GET()
+        assert any(r == ("status", 200) for r in h._responses)
+        h.wfile.seek(0)
+        body = h.wfile.read().decode("utf-8")
+        assert "IoE" in body
+
+    def test_status_pending_when_no_response(self):
+        h = _make_handler("/status", "id=nonexistent")
+        h.respond_json = MagicMock()
+        h.do_GET()
+        h.respond_json.assert_called_once_with({"status": "pending"})
+
+    def test_status_ready_with_results(self):
+        req_id = "status-test-1"
+        ioe_web.pending[req_id] = {"id": req_id, "status": 200, "results": [{"title": "R1"}]}
+        h = _make_handler("/status", f"id={req_id}")
+        h.respond_json = MagicMock()
+        h.do_GET()
+        resp = h.respond_json.call_args[0][0]
+        assert resp["status"] == "ready"
+        assert resp["results"] == [{"title": "R1"}]
+
+    def test_status_ready_with_body(self):
+        req_id = "status-test-2"
+        ioe_web.pending[req_id] = {"id": req_id, "status": 200, "title": "T", "body": "B", "format": "html"}
+        h = _make_handler("/status", f"id={req_id}")
+        h.respond_json = MagicMock()
+        h.do_GET()
+        resp = h.respond_json.call_args[0][0]
+        assert resp["status"] == "ready"
+        assert resp["title"] == "T"
+        assert resp["body"] == "B"
+
+    def test_status_error_response(self):
+        req_id = "status-test-3"
+        ioe_web.pending[req_id] = {"id": req_id, "status": 500, "error": "oops"}
+        h = _make_handler("/status", f"id={req_id}")
+        h.respond_json = MagicMock()
+        h.do_GET()
+        resp = h.respond_json.call_args[0][0]
+        assert resp["status"] == "error"
+        assert resp["error"] == "oops"
+
+    @patch.object(ioe_web, "imap_conn")
+    @patch.object(ioe_web, "send_request")
+    @patch("threading.Thread")
+    def test_get_sends_request_and_starts_poll(self, mock_thread, mock_send, mock_conn):
+        mock_conn.return_value = MagicMock()
+        h = _make_handler("/get", "url=https://example.com")
+        h.respond_json = MagicMock()
+        h.do_GET()
+        mock_send.assert_called_once()
+        mock_thread.return_value.start.assert_called_once()
+        resp = h.respond_json.call_args[0][0]
+        assert resp["status"] == "pending"
+        assert "id" in resp
+
+    @patch.object(ioe_web, "imap_conn")
+    @patch.object(ioe_web, "send_request")
+    @patch("threading.Thread")
+    def test_search_sends_request(self, mock_thread, mock_send, mock_conn):
+        mock_conn.return_value = MagicMock()
+        h = _make_handler("/search", "q=hello")
+        h.respond_json = MagicMock()
+        h.do_GET()
+        req_arg = mock_send.call_args[0][1]
+        assert req_arg["cmd"] == "SEARCH"
+        assert req_arg["query"] == "hello"
+
+    @patch.object(ioe_web, "imap_conn", side_effect=Exception("fail"))
+    def test_get_imap_failure_returns_error(self, mock_conn):
+        h = _make_handler("/get", "url=https://example.com")
+        h.respond_json = MagicMock()
+        h.do_GET()
+        resp = h.respond_json.call_args[0][0]
+        assert resp["status"] == "error"
+
+    def test_unknown_path_returns_404(self):
+        h = _make_handler("/nonexistent")
+        h.do_GET()
+        assert any(r[0] == "error" and r[1] == 404 for r in h._responses)
+
+
+class TestClientMain(unittest.TestCase):
+    @patch.object(ioe_web, "HTTPServer")
+    def test_main_default_port(self, mock_server_cls):
+        mock_instance = MagicMock()
+        mock_server_cls.return_value = mock_instance
+        mock_instance.serve_forever.side_effect = KeyboardInterrupt
+        with patch("sys.argv", ["ioe_web.py"]):
+            ioe_web.main()
+        mock_server_cls.assert_called_once_with(("0.0.0.0", 8080), ioe_web.Handler)
+
+    @patch.object(ioe_web, "HTTPServer")
+    def test_main_custom_port(self, mock_server_cls):
+        mock_instance = MagicMock()
+        mock_server_cls.return_value = mock_instance
+        mock_instance.serve_forever.side_effect = KeyboardInterrupt
+        with patch("sys.argv", ["ioe_web.py", "9090"]):
+            ioe_web.main()
+        mock_server_cls.assert_called_once_with(("0.0.0.0", 9090), ioe_web.Handler)
 
 
 if __name__ == "__main__":

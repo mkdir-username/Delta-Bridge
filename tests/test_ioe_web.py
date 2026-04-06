@@ -1131,3 +1131,389 @@ class TestBrowserMode:
             urlopen(f"http://127.0.0.1:{port}/browser?url=https://example.com", timeout=5)
         assert sent_data.get("user_id") == TEST_USER
         server.server_close()
+
+
+class TestClassifyError:
+    def test_rate_limit_with_seconds(self):
+        err_type, msg = handler._classify_error("A]> wait of 120 seconds is required")
+        assert err_type == "rate_limit"
+        assert "2 мин" in msg
+
+    def test_transport_timeout(self):
+        err_type, msg = handler._classify_error("Connection timeout reached")
+        assert err_type == "transport"
+
+    def test_unknown_error(self):
+        err_type, msg = handler._classify_error("something weird")
+        assert err_type == "vps"
+
+
+class TestLoginFlow:
+    def test_login_get_returns_html(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        old_auth = auth.get_authenticated_user
+        auth.get_authenticated_user = lambda cookie_header: None
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        resp = urlopen(f"http://127.0.0.1:{port}/login", timeout=5)
+        body = resp.read().decode()
+        assert resp.status == 200
+        server.server_close()
+        auth.get_authenticated_user = old_auth
+
+    def test_unauthenticated_redirects_to_login(self):
+        import ioe_web
+        import http.client
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        old_auth = auth.get_authenticated_user
+        auth.get_authenticated_user = lambda cookie_header: None
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        assert resp.status == 302
+        assert resp.getheader("Location") == "/login"
+        conn.close()
+        server.server_close()
+        auth.get_authenticated_user = old_auth
+
+    def test_login_post_form_success(self):
+        import ioe_web
+        import http.client
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        old_auth = auth.get_authenticated_user
+        auth.get_authenticated_user = lambda cookie_header: None
+
+        with (
+            patch.object(auth, "check_rate_limit", return_value=True),
+            patch.object(auth, "verify_password", return_value=True),
+            patch.object(auth, "create_session", return_value="sid123"),
+        ):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request(
+                "POST",
+                "/login",
+                body="username=admin&password=secret",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            resp = conn.getresponse()
+            assert resp.status == 302
+            assert "sid123" in (resp.getheader("Set-Cookie") or "")
+            conn.close()
+        server.server_close()
+        auth.get_authenticated_user = old_auth
+
+    def test_login_post_form_failure(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        old_auth = auth.get_authenticated_user
+        auth.get_authenticated_user = lambda cookie_header: None
+
+        with (
+            patch.object(auth, "check_rate_limit", return_value=True),
+            patch.object(auth, "verify_password", return_value=False),
+        ):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            body = b"username=admin&password=wrong"
+            from urllib.request import Request
+
+            req = Request(
+                f"http://127.0.0.1:{port}/login",
+                data=body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            resp = urlopen(req, timeout=5)
+            assert resp.status == 200
+        server.server_close()
+        auth.get_authenticated_user = old_auth
+
+    def test_login_post_rate_limited(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        old_auth = auth.get_authenticated_user
+        auth.get_authenticated_user = lambda cookie_header: None
+
+        with patch.object(auth, "check_rate_limit", return_value=False):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            body = b"username=admin&password=x"
+            from urllib.request import Request
+            from urllib.error import HTTPError as UrlHTTPError
+
+            req = Request(
+                f"http://127.0.0.1:{port}/login",
+                data=body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            try:
+                resp = urlopen(req, timeout=5)
+                assert resp.status in (200, 429)
+            except UrlHTTPError as e:
+                assert e.code == 429
+        server.server_close()
+        auth.get_authenticated_user = old_auth
+
+
+class TestPostTgEndpoint:
+    def test_post_tg_returns_pending(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with patch("transport.imap_conn") as mock_conn, patch("transport.send_request"):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            from urllib.request import Request
+
+            body = json.dumps({"action": "get_dialogs"}).encode()
+            req = Request(
+                f"http://127.0.0.1:{port}/tg",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            resp = urlopen(req, timeout=5)
+            data = json.loads(resp.read().decode())
+            assert data["status"] == "pending"
+        server.server_close()
+
+    def test_post_tg_invalid_json(self):
+        import ioe_web
+        import http.client
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("POST", "/tg", body="not json", headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode())
+        assert data["status"] == "error"
+        conn.close()
+        server.server_close()
+
+    def test_post_tg_imap_failure(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with patch("transport.imap_conn", side_effect=Exception("conn fail")):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            from urllib.request import Request
+
+            body = json.dumps({"action": "get_dialogs"}).encode()
+            req = Request(
+                f"http://127.0.0.1:{port}/tg",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            resp = urlopen(req, timeout=5)
+            data = json.loads(resp.read().decode())
+            assert data["status"] == "error"
+        server.server_close()
+
+    def test_post_tg_unauthenticated(self):
+        import ioe_web
+        import http.client
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        old_auth = auth.get_authenticated_user
+        auth.get_authenticated_user = lambda cookie_header: None
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        body = json.dumps({"action": "get_dialogs"})
+        conn.request("POST", "/tg", body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        assert resp.status == 302
+        conn.close()
+        server.server_close()
+        auth.get_authenticated_user = old_auth
+
+
+class TestIoeWebMain:
+    def test_main_default_port(self):
+        import ioe_web
+        import webbrowser
+
+        with (
+            patch("sys.argv", ["ioe_web.py"]),
+            patch.object(ioe_web, "HTTPServer") as mock_srv,
+            patch.object(auth, "load_whitelist"),
+            patch.object(auth, "init_sessions"),
+            patch.object(auth, "_whitelist", ["x"]),
+            patch("threading.Timer"),
+            patch.object(webbrowser, "open", create=True),
+        ):
+            mock_instance = MagicMock()
+            mock_srv.return_value = mock_instance
+            mock_instance.serve_forever.side_effect = KeyboardInterrupt
+            ioe_web.main()
+            mock_srv.assert_called_once()
+
+    def test_main_demo_port_arg(self):
+        import ioe_web
+        import webbrowser
+
+        with (
+            patch("sys.argv", ["ioe_web.py", "--demo", "9090"]),
+            patch.object(ioe_web, "HTTPServer") as mock_srv,
+            patch.object(auth, "load_whitelist"),
+            patch.object(auth, "init_sessions"),
+            patch.object(auth, "_whitelist", ["x"]),
+            patch("threading.Timer"),
+            patch.object(webbrowser, "open", create=True),
+        ):
+            mock_instance = MagicMock()
+            mock_srv.return_value = mock_instance
+            mock_instance.serve_forever.side_effect = KeyboardInterrupt
+            ioe_web.main()
+            call_args = mock_srv.call_args[0]
+            assert call_args[0] == ("0.0.0.0", 9090)
+
+    def test_main_empty_whitelist_warning(self, capsys):
+        import ioe_web
+        import webbrowser
+
+        with (
+            patch("sys.argv", ["ioe_web.py"]),
+            patch.object(ioe_web, "HTTPServer") as mock_srv,
+            patch.object(auth, "load_whitelist"),
+            patch.object(auth, "init_sessions"),
+            patch.object(auth, "_whitelist", set()),
+            patch("threading.Timer"),
+            patch.object(webbrowser, "open", create=True),
+        ):
+            mock_instance = MagicMock()
+            mock_srv.return_value = mock_instance
+            mock_instance.serve_forever.side_effect = KeyboardInterrupt
+            ioe_web.main()
+            captured = capsys.readouterr()
+            assert "WHITELIST EMPTY" in captured.out
+
+
+class TestGetImapFailure:
+    def test_get_imap_failure_classifies_error(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with patch.object(handler, "imap_conn", side_effect=Exception("Connection refused")):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            resp = urlopen(f"http://127.0.0.1:{port}/get?url=https://example.com", timeout=5)
+            data = json.loads(resp.read().decode())
+            assert data["status"] == "error"
+            assert data.get("error_type") == "transport"
+        server.server_close()
+
+    def test_proxy_body_json_parsing(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        sent_data = {}
+
+        def capture_send(m, req):
+            sent_data.update(req)
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            import urllib.parse
+
+            body_json = urllib.parse.quote('{"key": "val"}')
+            urlopen(
+                f"http://127.0.0.1:{port}/proxy?method=POST&url=https://api.test.com&body={body_json}&session_id=sess1",
+                timeout=5,
+            )
+        assert sent_data.get("body") == {"key": "val"}
+        assert sent_data.get("session_id") == "sess1"
+        server.server_close()
+
+    def test_browser_imap_failure(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with patch.object(handler, "imap_conn", side_effect=Exception("timeout")):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            resp = urlopen(f"http://127.0.0.1:{port}/browser?url=https://example.com", timeout=5)
+            data = json.loads(resp.read().decode())
+            assert data["status"] == "error"
+        server.server_close()
+
+    def test_claude_imap_failure(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with patch.object(handler, "imap_conn", side_effect=Exception("timeout")):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            resp = urlopen(f"http://127.0.0.1:{port}/claude?action=send&text=hi", timeout=5)
+            data = json.loads(resp.read().decode())
+            assert data["status"] == "error"
+        server.server_close()
+
+    def test_tg_imap_failure(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        with patch.object(handler, "imap_conn", side_effect=Exception("Connection refused")):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            resp = urlopen(f"http://127.0.0.1:{port}/tg?action=get_dialogs", timeout=5)
+            data = json.loads(resp.read().decode())
+            assert data["status"] == "error"
+            assert data.get("error_type") == "transport"
+        server.server_close()
+
+    def test_tg_chat_id_int_parsing(self):
+        import ioe_web
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        sent_data = {}
+
+        def capture_send(m, req):
+            sent_data.update(req)
+
+        with (
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
+        ):
+            mock_conn.return_value = MagicMock()
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            urlopen(
+                f"http://127.0.0.1:{port}/tg?action=get_messages&chat_id=123&limit=10",
+                timeout=5,
+            )
+        assert sent_data.get("chat_id") == 123
+        assert sent_data.get("limit") == 10
+        server.server_close()
