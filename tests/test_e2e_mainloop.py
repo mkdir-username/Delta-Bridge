@@ -93,19 +93,24 @@ def _run_main(
     tick_count = 0
     time_idx = 0
     if time_seq is None:
-        time_seq = [100.0]  # constant time — no reconnect trigger
+        time_seq = [100.0]
 
-    def fake_imap_factory(host: str, ssl: bool = True) -> FakeIMAPClient:
-        try:
-            return next(client_iter)
-        except StopIteration:
-            raise _TickLimitReached(0) from None
-
-    def fake_sleep(seconds: float) -> None:
+    def tick() -> None:
         nonlocal tick_count
         tick_count += 1
         if tick_count >= max_ticks:
             raise _TickLimitReached(0)
+
+    def fake_imap_factory(host: str, ssl: bool = True) -> FakeIMAPClient:
+        try:
+            client = next(client_iter)
+            client._tick_callback = tick
+            return client
+        except StopIteration:
+            raise _TickLimitReached(0) from None
+
+    def fake_sleep(seconds: float) -> None:
+        tick()
 
     def fake_time() -> float:
         nonlocal time_idx
@@ -150,7 +155,7 @@ class TestNormalFlow:
         _run_main([fake], max_ticks=5)
 
         assert fake.search_count >= 1
-        assert fake.noop_count >= 1
+        assert fake.idle_count >= 1
         assert len(fake._deleted) == 0
         assert len(fake._appended) == 0
 
@@ -191,7 +196,7 @@ class TestZombie:
         # Inject a second message after zombie — it won't be found
         # (In practice, the zombie already started by tick 2, so any messages
         #  injected after that point would be invisible to search)
-        assert fake.noop_count >= 2
+        assert fake.idle_count >= 2
 
     def test_reconnect_breaks_zombie(self) -> None:
         """Time exceeds RECONNECT_INTERVAL → break inner loop → fresh client works."""
@@ -242,7 +247,7 @@ class TestErrors:
         _run_main([timeout_client, fresh_client], max_ticks=5)
 
         # Timeout client raised, outer loop caught it
-        assert timeout_client.noop_count == 1
+        assert timeout_client.idle_count == 1
         # Fresh client processed the message
         assert 1 in fresh_client._deleted
 
@@ -257,5 +262,5 @@ class TestErrors:
 
         _run_main([disc_client, fresh_client], max_ticks=5)
 
-        assert disc_client.noop_count == 1
+        assert disc_client.idle_count == 1
         assert 1 in fresh_client._deleted

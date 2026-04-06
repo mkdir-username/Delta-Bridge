@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import types
 from unittest.mock import MagicMock, patch
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -8,6 +9,10 @@ from email import encoders
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "webui"))
 sys.path.insert(0, os.path.dirname(__file__))
+
+if "imapclient" not in sys.modules:
+    sys.modules["imapclient"] = types.ModuleType("imapclient")
+    sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 
 os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "test")
@@ -34,41 +39,39 @@ def _make_encrypted_email(response_dict: dict) -> bytes:
 
 
 class TestImapConnRetry:
+    def setup_method(self):
+        transport._pool.clear()
+
     def test_первое_подключение_успешно(self):
-        mock_imap = MagicMock()
-        with (
-            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
-            patch("ioe_web.IMAP_HOST", "imap.example.com"),
-        ):
+        mock_client = MagicMock()
+        with patch("transport.IMAPClient", return_value=mock_client):
             result = transport.imap_conn()
-        assert result is mock_imap
-        mock_imap.login.assert_called_once()
+        assert result is mock_client
+        mock_client.login.assert_called_once()
 
     def test_первый_вызов_падает_второй_успешен(self):
-        mock_imap = MagicMock()
+        mock_client = MagicMock()
         call_count = [0]
 
-        def imap_factory(*args):
+        def factory(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ConnectionError("temporary")
-            return mock_imap
+            return mock_client
 
         with (
-            patch("imaplib.IMAP4_SSL", side_effect=imap_factory),
-            patch("ioe_web.IMAP_HOST", "imap.example.com"),
+            patch("transport.IMAPClient", side_effect=factory),
             patch("time.sleep"),
         ):
             result = transport.imap_conn()
-        assert result is mock_imap
+        assert result is mock_client
         assert call_count[0] == 2
 
     def test_все_попытки_упали_поднимает_исключение(self):
         import pytest
 
         with (
-            patch("imaplib.IMAP4_SSL", side_effect=ConnectionError("down")),
-            patch("ioe_web.IMAP_HOST", "imap.example.com"),
+            patch("transport.IMAPClient", side_effect=ConnectionError("down")),
             patch("time.sleep"),
             pytest.raises(ConnectionError),
         ):
@@ -80,12 +83,12 @@ class TestPollResponseErrors:
         ioe_web.pending.clear()
         ioe_web.seen_notification_uids.clear()
 
-    def test_fetch_возвращает_none_данные_продолжает_цикл(self):
+    def test_fetch_возвращает_пустой_dict_продолжает_цикл(self):
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1"])
-        mock_imap.fetch.return_value = ("OK", [None])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = [1]
+        mock_imap.fetch.return_value = {}
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
 
@@ -102,12 +105,12 @@ class TestPollResponseErrors:
 
     def test_decrypt_ошибка_продолжает_цикл(self):
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1"])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = [1]
 
         fake_raw = b"From: x\r\n\r\nbody"
-        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {4})", fake_raw)])
+        mock_imap.fetch.return_value = {1: {b"RFC822": fake_raw}}
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
 
@@ -124,9 +127,9 @@ class TestPollResponseErrors:
 
     def test_fetch_пустой_список_uids_пропускает(self):
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b""])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = []
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
 
@@ -148,10 +151,10 @@ class TestPollResponseErrors:
         raw = _make_encrypted_email(notification)
 
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"42"])
-        mock_imap.fetch.return_value = ("OK", [(b"42 (RFC822 {100})", raw)])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = [42]
+        mock_imap.fetch.return_value = {42: {b"RFC822": raw}}
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
 
@@ -167,18 +170,18 @@ class TestPollResponseErrors:
         assert all(n.get("msg") != "hello" or True for n in queue)
         ioe_web.seen_notification_uids.discard(uid_key)
 
-    def test_store_ошибка_при_найденном_ответе_продолжает(self):
+    def test_set_flags_ошибка_при_найденном_ответе_продолжает(self):
         req_id = "req-store-err"
         response_dict = {"id": req_id, "status": 200, "body": "ok"}
         raw = _make_encrypted_email(response_dict)
 
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1"])
-        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
-        mock_imap.store.side_effect = Exception("store failed")
-        mock_imap.expunge.return_value = ("OK", [])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = [1]
+        mock_imap.fetch.return_value = {1: {b"RFC822": raw}}
+        mock_imap.set_flags.side_effect = Exception("store failed")
+        mock_imap.expunge.return_value = None
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
 
@@ -195,23 +198,22 @@ class TestPollResponseErrors:
 
     def test_старые_письма_удаляются_на_10м_цикле(self):
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        search_call_count = [0]
-        old_search_calls = []
-
-        def fake_search(charset, *criteria):
-            old_search_calls.append(criteria)
-            if "BEFORE" in criteria:
-                return ("OK", [b""])
-            n = search_call_count[0]
-            search_call_count[0] += 1
-            uid = str(n + 1).encode()
-            return ("OK", [uid])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        search_calls = []
+        call_count = [0]
 
         fake_raw = b"From: x\r\n\r\nbody"
+
+        def fake_search(criteria):
+            search_calls.append(criteria)
+            if "BEFORE" in criteria:
+                return []
+            call_count[0] += 1
+            return [call_count[0]]
+
         mock_imap.search.side_effect = fake_search
-        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {4})", fake_raw)])
+        mock_imap.fetch.return_value = {1: {b"RFC822": fake_raw}}
         mock_imap.logout.return_value = None
 
         with (
@@ -221,7 +223,7 @@ class TestPollResponseErrors:
         ):
             transport.poll_response("user1", "req-old-cleanup")
 
-        has_before = any("BEFORE" in c for criteria in old_search_calls for c in criteria)
+        has_before = any("BEFORE" in criteria for criteria in search_calls if isinstance(criteria, list))
         assert has_before
 
     def test_classify_error_вызывается_при_ошибке_в_ответе(self):
@@ -230,12 +232,12 @@ class TestPollResponseErrors:
         raw = _make_encrypted_email(response_dict)
 
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1"])
-        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
-        mock_imap.store.return_value = ("OK", [])
-        mock_imap.expunge.return_value = ("OK", [])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = [1]
+        mock_imap.fetch.return_value = {1: {b"RFC822": raw}}
+        mock_imap.set_flags.return_value = {}
+        mock_imap.expunge.return_value = None
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
 
@@ -264,7 +266,6 @@ class TestPollResponseErrors:
         assert ioe_web.pending[key]["error"] == "classified error"
 
     def test_stale_response_uids_cleaned_when_own_found(self):
-        """При нахождении своего ответа — удаляются ВСЕ расшифрованные response UIDs."""
         req_id = "req-cleanup"
         my_response = {"id": req_id, "status": 200, "body": "ok"}
         stale_response = {"id": "old-req-999", "status": 200, "body": "stale"}
@@ -273,15 +274,14 @@ class TestPollResponseErrors:
         raw_stale = _make_encrypted_email(stale_response)
 
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"10 20"])
-        mock_imap.fetch.side_effect = lambda uid, _: (
-            "OK",
-            [(uid, raw_mine if uid == b"10" else raw_stale)],
-        )
-        mock_imap.store.return_value = ("OK", [])
-        mock_imap.expunge.return_value = ("OK", [])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = [10, 20]
+        mock_imap.fetch.side_effect = lambda uids, _: {
+            uid: {b"RFC822": raw_mine if uid == 10 else raw_stale} for uid in uids
+        }
+        mock_imap.set_flags.return_value = {}
+        mock_imap.expunge.return_value = None
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
 
@@ -295,7 +295,10 @@ class TestPollResponseErrors:
         key = ("user1", req_id)
         assert key in ioe_web.pending
 
-        store_calls = [c[0] for c in mock_imap.store.call_args_list]
-        deleted_uids = {c[0] for c in store_calls}
-        assert b"10" in deleted_uids, "own UID must be deleted"
-        assert b"20" in deleted_uids, "stale response UID must also be deleted"
+        set_flags_calls = mock_imap.set_flags.call_args_list
+        all_flagged_uids = set()
+        for call in set_flags_calls:
+            for uid in call[0][0]:
+                all_flagged_uids.add(uid)
+        assert 10 in all_flagged_uids, "own UID must be deleted"
+        assert 20 in all_flagged_uids, "stale response UID must also be deleted"

@@ -6,7 +6,6 @@ import json
 import uuid
 import time
 import random
-import imaplib
 import email as email_mod
 import re
 import logging
@@ -19,21 +18,28 @@ import sys as _sys
 import os as _os
 
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
-from ioe_crypto import encrypt, decrypt
+from ioe_crypto import compress_encrypt, decrypt_decompress
+
+from imapclient import IMAPClient
 
 log = logging.getLogger("ioe-web")
 
+import threading
 
-def imap_conn() -> imaplib.IMAP4_SSL:
+_pool: dict[str, IMAPClient] = {}
+_pool_lock = threading.Lock()
+
+
+def _create_conn() -> IMAPClient:
     import ioe_web
 
     last_err = None
     delays = [2, 5, 10, 20, 30]
     for attempt in range(len(delays) + 1):
         try:
-            m = imaplib.IMAP4_SSL(ioe_web.IMAP_HOST, 993)
-            m.login(ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
-            return m
+            client = IMAPClient(ioe_web.IMAP_HOST, ssl=True)
+            client.login(ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
+            return client
         except Exception as e:
             last_err = e
             if attempt < len(delays):
@@ -48,25 +54,59 @@ def imap_conn() -> imaplib.IMAP4_SSL:
     raise last_err  # type: ignore[misc]  # always set after len(delays)+1 attempts
 
 
-def send_request(m: imaplib.IMAP4_SSL, request_dict: dict[str, Any]) -> None:
+def imap_conn() -> IMAPClient:
+    import ioe_web
+
+    with _pool_lock:
+        key = f"{ioe_web.EMAIL}@{ioe_web.IMAP_HOST}"
+        if key in _pool:
+            client = _pool[key]
+            try:
+                client.noop()
+                return client
+            except Exception:
+                log.info("Stale pooled connection, reconnecting")
+                try:
+                    client.logout()
+                except Exception:
+                    pass
+                del _pool[key]
+        client = _create_conn()
+        _pool[key] = client
+        return client
+
+
+def send_request(m: Any, request_dict: dict[str, Any]) -> None:
     import ioe_web
 
     rid = request_dict.get("id", "?")
     log.info("[%s] send_request: APPEND to %s", rid, ioe_web.QUEUE_FOLDER)
     payload = json.dumps(request_dict)
-    encrypted = encrypt(ioe_web.IOE_KEY, payload).encode("ascii")
-    msg = MIMEMultipart()
+    encrypted = compress_encrypt(ioe_web.IOE_KEY, payload).encode("ascii")
+    subtype = random.choice(["mixed", "alternative", "related"])
+    msg = MIMEMultipart(subtype)
     msg["Subject"] = f"{random.choice(ioe_web.SUBJECTS)} {uuid.uuid4().hex[:8]}"
     msg["From"] = ioe_web.EMAIL
     msg["To"] = ioe_web.EMAIL
-    msg.attach(MIMEText(random.choice(ioe_web.BODIES), "plain", "utf-8"))
-    part = MIMEBase("application", "pdf")
+    if random.random() < 0.3:
+        msg["Reply-To"] = ioe_web.EMAIL
+    if random.random() < 0.3:
+        msg["In-Reply-To"] = f"<{uuid.uuid4().hex[:12]}@yandex.ru>"
+    body_text = random.choice(ioe_web.BODIES)
+    if body_text:
+        body_text += " " * random.randint(0, 200)
+    msg.attach(MIMEText(body_text, "plain", "utf-8"))
+    app_type = random.choice([("application", "pdf"), ("application", "octet-stream"), ("application", "x-compressed")])
+    part = MIMEBase(app_type[0], app_type[1])
     part.set_payload(encrypted)
     encoders.encode_base64(part)
     part.add_header("Content-Disposition", "attachment", filename=random.choice(ioe_web.FILENAMES))
     msg.attach(part)
-    m.append(ioe_web.QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
-    log.info("[%s] send_request: APPEND OK", rid)
+    from ioe_telemetry import Timer
+
+    with Timer() as t_append:
+        m.append(ioe_web.QUEUE_FOLDER, msg.as_bytes())
+    log.info("[%s] send_request: APPEND OK (%.0fms, %d bytes)", rid, t_append.elapsed_ms, len(encrypted))
 
 
 def extract_attachment(raw: bytes) -> bytes | None:
@@ -80,42 +120,50 @@ def extract_attachment(raw: bytes) -> bytes | None:
 
 def poll_response(user_id: str, req_id: str) -> None:
     import ioe_web
+    from ioe_telemetry import RequestTiming, Timer, collector
 
+    timing = RequestTiming(req_id)
     t0 = time.time()
     try:
         log.info("[%s] poll: connecting IMAP...", req_id)
-        m = imap_conn()
+        with Timer() as t_conn:
+            m = imap_conn()
+        timing.record("connect", t_conn.elapsed_ms)
         log.info("[%s] poll: connected (%.1fs)", req_id, time.time() - t0)
-        m.select("INBOX")
-        seen_uids = set()
-        stale_response_uids: list[bytes] = []
+        m.select_folder("INBOX")
+        seen_uids: set[int] = set()
+        stale_response_uids: list[int] = []
         for cycle in range(60):
             if cycle > 0:
-                time.sleep(1 + random.random() * 0.6)
-            m.noop()
-            _, msgs = m.search(None, "ALL")
-            if not msgs[0]:
+                try:
+                    m.idle()
+                    m.idle_check(timeout=10)
+                    m.idle_done()
+                except Exception:
+                    time.sleep(1 + random.random() * 0.6)
+                    m.noop()
+            uids = m.search(["ALL"])
+            if not uids:
                 continue
-            uids = msgs[0].split()
             new_uids = [u for u in uids if u not in seen_uids]
             if not new_uids and cycle > 0:
                 continue
             for uid in reversed(new_uids):
                 seen_uids.add(uid)
-                _, data = m.fetch(uid, "(RFC822)")
-                if not data or not data[0] or data[0] is None:
+                data = m.fetch([uid], ["RFC822"])
+                if uid not in data:
                     continue
-                raw = data[0][1]
+                raw = data[uid].get(b"RFC822")
                 if not isinstance(raw, bytes):
                     continue
                 att = extract_attachment(raw)
                 if att is None:
                     continue
                 try:
-                    decrypted = decrypt(ioe_web.IOE_KEY, att.decode("ascii").strip())
+                    decrypted = decrypt_decompress(ioe_web.IOE_KEY, att.decode("ascii").strip())
                     response = json.loads(decrypted)
                     if response.get("type") == "notification":
-                        uid_key = uid.decode() if isinstance(uid, bytes) else str(uid)
+                        uid_key = str(uid)
                         with ioe_web.lock:
                             if uid_key in ioe_web.seen_notification_uids:
                                 continue
@@ -127,6 +175,7 @@ def poll_response(user_id: str, req_id: str) -> None:
                         stale_response_uids.append(uid)
                     if rid == req_id:
                         elapsed = time.time() - t0
+                        timing.record("wait", elapsed * 1000 - t_conn.elapsed_ms)
                         log.info(
                             "[%s] poll: FOUND response (%.1fs, status=%s)",
                             req_id,
@@ -134,9 +183,8 @@ def poll_response(user_id: str, req_id: str) -> None:
                             response.get("status"),
                         )
                         try:
-                            for suid in stale_response_uids:
-                                m.store(suid, "+FLAGS", "\\Deleted")  # type: ignore[arg-type]  # imaplib accepts bytes
-                            m.store(uid, "+FLAGS", "\\Deleted")
+                            delete_uids = stale_response_uids + [uid]
+                            m.set_flags(delete_uids, [b"\\Deleted"])
                             m.expunge()
                         except Exception as e:
                             log.debug("[%s] poll: cleanup failed: %s", req_id, e)
@@ -147,9 +195,10 @@ def poll_response(user_id: str, req_id: str) -> None:
                             response["error"] = err_msg
                             if "error_type" not in response:
                                 response["error_type"] = err_type
+                        collector.record(timing)
+                        log.info("[%s] telemetry: %s", req_id, timing.summary())
                         with ioe_web.lock:
                             ioe_web.pending[(user_id, req_id)] = response
-                        m.logout()
                         return
                 except Exception as e:
                     log.debug("[%s] poll: decrypt/parse skip uid=%s: %s", req_id, uid, e)
@@ -167,10 +216,9 @@ def poll_response(user_id: str, req_id: str) -> None:
 
                 cutoff = (datetime.utcnow() - timedelta(minutes=5)).strftime("%d-%b-%Y")
                 try:
-                    _, old = m.search(None, "BEFORE", cutoff)
-                    if old[0]:
-                        for old_uid in old[0].split():
-                            m.store(old_uid, "+FLAGS", "\\Deleted")
+                    old = m.search(["BEFORE", cutoff])
+                    if old:
+                        m.set_flags(old, [b"\\Deleted"])
                         m.expunge()
                 except Exception as e:
                     log.debug("[%s] poll: old mail cleanup: %s", req_id, e)
@@ -183,7 +231,6 @@ def poll_response(user_id: str, req_id: str) -> None:
                 "error": f"timeout ({int(elapsed)}s)",
                 "error_type": "transport",
             }
-        m.logout()
     except Exception as e:
         elapsed = time.time() - t0
         log.error("[%s] poll: ERROR after %.0fs: %s", req_id, elapsed, e)
