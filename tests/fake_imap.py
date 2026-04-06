@@ -21,6 +21,8 @@ class FakeIMAPClient:
         self._connected = True
         self.noop_count = 0
         self.search_count = 0
+        self.idle_count = 0
+        self._tick_callback: Any = None
 
     # --- test helpers ---
 
@@ -83,6 +85,36 @@ class FakeIMAPClient:
 
     def expunge(self) -> None:
         self._assert_connected()
+
+    def idle(self) -> None:
+        self._assert_connected()
+        self._idle_active = True
+        self.idle_count += 1
+        if self._zombie_after is not None and self.idle_count >= self._zombie_after:
+            self._mode = "zombie"
+
+    def idle_check(self, timeout: int = 30) -> list[tuple[int, bytes]]:
+        self._assert_connected()
+        if self._tick_callback is not None:
+            self._tick_callback()
+        if self._mode == "timeout":
+            raise TimeoutError("fake timeout on idle")
+        if self._mode == "disconnected":
+            raise imaplib.IMAP4.abort("fake disconnect on idle")
+        if not getattr(self, "_idle_active", False):
+            return []
+        if self._messages:
+            return [(1, b"EXISTS")]
+        return []
+
+    def idle_done(self) -> tuple[bytes, list[bytes]]:
+        self._assert_connected()
+        self._idle_active = False
+        return (b"OK", [])
+
+    def set_flags(self, uids: list[int], flags: list[bytes]) -> dict[int, tuple[bytes, ...]]:
+        self._assert_connected()
+        return {uid: tuple(flags) for uid in uids}
 
     def append(self, folder: str, raw_bytes: bytes) -> None:
         self._appended.append((folder, raw_bytes))

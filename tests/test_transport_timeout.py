@@ -1,9 +1,14 @@
 import os
 import sys
+import types
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "webui"))
 sys.path.insert(0, os.path.dirname(__file__))
+
+if "imapclient" not in sys.modules:
+    sys.modules["imapclient"] = types.ModuleType("imapclient")
+    sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
 
 os.environ.setdefault("EMAIL", "test@test.com")
 os.environ.setdefault("IMAP_PASSWORD", "test")
@@ -19,9 +24,9 @@ class TestTransportTimeout:
 
     def test_poll_response_timeout_504(self):
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b""])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = []
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
         with (
@@ -52,9 +57,9 @@ class TestTransportTimeout:
 
     def test_old_message_cleanup(self):
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [b"INBOX"])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b""])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = []
         mock_imap.logout.return_value = None
         time_values = [0.0] * 200
         with (
