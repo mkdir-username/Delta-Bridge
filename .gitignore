@@ -7,3 +7,6 @@ __pycache__/
 .pytest_cache/
 .worktrees/
 .coverage
+HANDOVER.md
+sessions.json
+docs/superpowers/plans/
