@@ -921,18 +921,29 @@ def main() -> None:
                 client.select_folder(QUEUE_FOLDER)
                 log.info("Connected, monitoring folder '%s'", QUEUE_FOLDER)
                 connected_at = time.time()
+                iteration = 0
                 while True:
-                    if time.time() - connected_at > RECONNECT_INTERVAL:
-                        log.info("Reconnecting (stale prevention, %ds)", RECONNECT_INTERVAL)
+                    iteration += 1
+                    age = time.time() - connected_at
+                    if age > RECONNECT_INTERVAL:
+                        log.info(
+                            "Reconnecting (stale prevention, %ds, iter=%d)",
+                            RECONNECT_INTERVAL,
+                            iteration,
+                        )
                         break
                     client.noop()
+                    log.debug("noop ok (iter=%d, age=%.0fs)", iteration, age)
                     messages = client.search(["ALL"])
                     if messages:
                         log.info(
-                            "mainloop: search found %d uids: %s",
+                            "mainloop: search found %d uids: %s (iter=%d)",
                             len(messages),
                             messages[:10],
+                            iteration,
                         )
+                    else:
+                        log.debug("mainloop: search empty (iter=%d, age=%.0fs)", iteration, age)
                     for uid in messages:
                         data = client.fetch([uid], ["RFC822"])
                         raw = data[uid][b"RFC822"]
