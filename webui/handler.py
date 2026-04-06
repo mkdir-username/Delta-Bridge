@@ -462,6 +462,36 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/browser-search":
+            req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
+            q = qs.get("q", [""])[0]
+
+            if ioe_web.DEMO_MODE:
+                self.respond_json({"status": "error", "error": "browser search not available in demo"})
+                return
+
+            req = {
+                "id": req_id,
+                "type": "browser_search",
+                "query": q,
+                "user_id": user_id,
+            }
+            try:
+                log.info("[%s] browser-search: %s", req_id, q)
+                m = imap_conn()
+                send_request(m, req)
+                m.logout()
+            except Exception as e:
+                log.error("[%s] browser-search send FAILED: %s", req_id, e)
+                err_type, err_msg = _classify_error(str(e))
+                self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
+                return
+
+            t = threading.Thread(target=poll_response, args=(user_id, req_id), daemon=True)
+            t.start()
+            self.respond_json({"id": req_id, "status": "pending"})
+            return
+
         if parsed.path == "/browser":
             req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             url = qs.get("url", [""])[0]
