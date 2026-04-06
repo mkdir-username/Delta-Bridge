@@ -545,6 +545,53 @@ def do_search(query: str) -> list[dict[str, str]]:
         return [{"title": "Search error", "href": "", "snippet": str(e)}]
 
 
+def do_browser_search(query: str) -> list[dict[str, str]]:
+    from urllib.parse import quote_plus
+
+    try:
+        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        browser_req: dict[str, Any] = {
+            "url": url,
+            "actions": [
+                {"action": "goto"},
+                {"action": "extract", "selector": ".result__a"},
+            ],
+            "timeout": 15000,
+        }
+        resp = handle_browser_request(browser_req)
+        if resp.get("status") != 200:
+            return [
+                {
+                    "title": "Browser search error",
+                    "href": "",
+                    "snippet": resp.get("error", "unknown"),
+                }
+            ]
+        for r in resp.get("results", []):
+            if r.get("action") == "extract" and r.get("selector") == ".result__a":
+                elements = r.get("elements", [])
+                results = [
+                    {
+                        "title": el.get("text", "").strip(),
+                        "href": el.get("href", ""),
+                        "snippet": "",
+                    }
+                    for el in elements[:10]
+                    if el.get("text", "").strip()
+                ]
+                if results:
+                    return results
+        return [
+            {
+                "title": "No results",
+                "href": "",
+                "snippet": f"No results for: {query}",
+            }
+        ]
+    except Exception as e:
+        return [{"title": "Browser search error", "href": "", "snippet": str(e)}]
+
+
 def extract_attachment(raw: bytes) -> bytes | None:
     parsed = email_mod.message_from_bytes(raw)
     for part in parsed.walk():
@@ -769,6 +816,10 @@ def dispatch_request(request: dict[str, Any]) -> dict[str, Any] | None:
             del _sessions[sid]
             return {"status": 200, "session_id": sid, "user_id": user_id}
         return {"status": 404, "error": f"session {sid} not found", "user_id": user_id}
+    if req_type == "browser_search":
+        query = request.get("query", "")
+        results = do_browser_search(query)
+        return {"status": 200, "results": results, "user_id": user_id}
     if req_type == "browser":
         browser_result: dict[str, Any] = handle_browser_request(request)
         return browser_result
