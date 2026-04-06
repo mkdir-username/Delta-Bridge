@@ -87,8 +87,11 @@ function showError(msg) {
 }
 
 function doSearch(query) {
-  showLoading('\u0418\u0449\u0443 \u0447\u0435\u0440\u0435\u0437 IMAP...');
-  fetch('/search?q=' + encodeURIComponent(query))
+  var endpoint = browserMode
+    ? '/browser-search?q=' + encodeURIComponent(query)
+    : '/search?q=' + encodeURIComponent(query);
+  showLoading(browserMode ? '\u0418\u0449\u0443 \u0447\u0435\u0440\u0435\u0437 \u0431\u0440\u0430\u0443\u0437\u0435\u0440...' : '\u0418\u0449\u0443 \u0447\u0435\u0440\u0435\u0437 IMAP...');
+  fetch(endpoint)
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.error) { showError(d.error); return; }
