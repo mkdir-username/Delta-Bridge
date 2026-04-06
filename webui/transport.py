@@ -88,6 +88,7 @@ def poll_response(user_id: str, req_id: str) -> None:
         log.info("[%s] poll: connected (%.1fs)", req_id, time.time() - t0)
         m.select("INBOX")
         seen_uids = set()
+        stale_response_uids: list[bytes] = []
         for cycle in range(60):
             if cycle > 0:
                 time.sleep(1 + random.random() * 0.6)
@@ -122,6 +123,8 @@ def poll_response(user_id: str, req_id: str) -> None:
                             ioe_web.notification_queues.setdefault(user_id, []).append(response)
                         continue
                     rid = response.get("id", "")
+                    if rid != req_id:
+                        stale_response_uids.append(uid)
                     if rid == req_id:
                         elapsed = time.time() - t0
                         log.info(
@@ -131,6 +134,8 @@ def poll_response(user_id: str, req_id: str) -> None:
                             response.get("status"),
                         )
                         try:
+                            for suid in stale_response_uids:
+                                m.store(suid, "+FLAGS", "\\Deleted")  # type: ignore[arg-type]  # imaplib accepts bytes
                             m.store(uid, "+FLAGS", "\\Deleted")
                             m.expunge()
                         except Exception as e:
