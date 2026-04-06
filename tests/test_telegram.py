@@ -94,6 +94,60 @@ sys.modules["requests"] = _mock_requests
 
 sys.modules["trafilatura"].extract = MagicMock(return_value="")
 import asyncio
+from unittest.mock import AsyncMock
+
+
+def _make_real_sync_adapter():
+    """Adapter with real _run_sync that executes coroutines via event loop."""
+    from telegram_adapter import TelegramAdapter
+
+    adapter = TelegramAdapter.__new__(TelegramAdapter)
+    adapter.loop = asyncio.new_event_loop()
+    adapter.clients = {}
+    adapter.api_id = 0
+    adapter.api_hash = ""
+    adapter._auth_state = {}
+    adapter._last_notify = {}
+    adapter._notify_interval = 10
+
+    def _run_sync(coro):
+        return adapter.loop.run_until_complete(coro)
+
+    adapter._run_sync = _run_sync
+    return adapter
+
+
+def _make_mock_dialog(**overrides):
+    entity = MagicMock(spec=[])
+    if "megagroup" in overrides:
+        entity.megagroup = overrides.pop("megagroup")
+    if "broadcast" in overrides:
+        entity.broadcast = overrides.pop("broadcast")
+    if "title" in overrides:
+        entity.title = overrides.pop("title")
+    d = MagicMock()
+    d.id = overrides.get("id", 1)
+    d.name = overrides.get("name", "Test Chat")
+    d.unread_count = overrides.get("unread_count", 0)
+    d.message = overrides.get("message", MagicMock(text="hello", date=None))
+    d.date = overrides.get("date")
+    d.entity = entity
+    d.archived = overrides.get("archived", False)
+    d.pinned = overrides.get("pinned", False)
+    return d
+
+
+def _make_mock_message(**overrides):
+    m = MagicMock()
+    m.id = overrides.get("id", 100)
+    m.sender = MagicMock(first_name=overrides.get("sender_name", "Alice"))
+    m.sender_id = overrides.get("sender_id", 42)
+    m.text = overrides.get("text", "Hello")
+    m.date = overrides.get("date", MagicMock(isoformat=MagicMock(return_value="2026-04-06T10:00:00")))
+    m.out = overrides.get("out", False)
+    m.reply_to = overrides.get("reply_to")
+    m.media = overrides.get("media")
+    return m
 
 
 def _mock_adapter(return_value):
@@ -781,3 +835,236 @@ class TestTelegramListenerEventHandler:
         adapter._last_notify["u"] = time.time() - 20
         adapter.loop.close()
         assert adapter._notify_interval == 10
+
+
+class TestTelegramAdapterAsync:
+    """Tests that execute real async bodies inside adapter methods."""
+
+    def test_get_dialogs_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        dialog = _make_mock_dialog(name="Chat1", unread_count=5)
+        mock_client.get_dialogs = AsyncMock(return_value=[dialog])
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("get_dialogs", {"limit": 10})
+        assert result["status"] == 200
+        assert len(result["dialogs"]) == 1
+        assert result["dialogs"][0]["name"] == "Chat1"
+        assert result["dialogs"][0]["unread"] == 5
+        adapter.loop.close()
+
+    def test_get_dialogs_megagroup_type(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        dialog = _make_mock_dialog(megagroup=True)
+        mock_client.get_dialogs = AsyncMock(return_value=[dialog])
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("get_dialogs", {})
+        assert result["dialogs"][0]["type"] == "group"
+        adapter.loop.close()
+
+    def test_get_dialogs_broadcast_type(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        dialog = _make_mock_dialog(broadcast=True)
+        mock_client.get_dialogs = AsyncMock(return_value=[dialog])
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("get_dialogs", {})
+        assert result["dialogs"][0]["type"] == "channel"
+        adapter.loop.close()
+
+    def test_get_dialogs_title_type(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        dialog = _make_mock_dialog(title="Group Name")
+        mock_client.get_dialogs = AsyncMock(return_value=[dialog])
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("get_dialogs", {})
+        assert result["dialogs"][0]["type"] == "group"
+        adapter.loop.close()
+
+    def test_get_unread_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        d1 = _make_mock_dialog(id=1, name="A", unread_count=3)
+        d2 = _make_mock_dialog(id=2, name="B", unread_count=0)
+        mock_client.get_dialogs = AsyncMock(return_value=[d1, d2])
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("get_unread", {})
+        assert result["status"] == 200
+        assert len(result["unread_chats"]) == 1
+        assert result["unread_chats"][0]["name"] == "A"
+        adapter.loop.close()
+
+    def test_get_messages_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        msg = _make_mock_message(id=101, text="Hello world")
+        mock_client.get_messages = AsyncMock(return_value=[msg])
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("get_messages", {"chat_id": 1, "limit": 10})
+        assert result["status"] == 200
+        assert len(result["messages"]) == 1
+        assert result["messages"][0]["text"] == "Hello world"
+        adapter.loop.close()
+
+    def test_get_messages_with_reply_and_media(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        reply_to = MagicMock()
+        reply_to.reply_to_msg_id = 50
+        msg = _make_mock_message(reply_to=reply_to, media=MagicMock())
+        mock_client.get_messages = AsyncMock(return_value=[msg])
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("get_messages", {"chat_id": 1})
+        assert result["messages"][0]["reply_to_id"] == 50
+        assert result["messages"][0]["has_media"] is True
+        adapter.loop.close()
+
+    def test_send_message_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=MagicMock(id=42))
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("send_message", {"chat_id": 1, "text": "hi"})
+        assert result["status"] == 200
+        assert result["message_id"] == 42
+        adapter.loop.close()
+
+    def test_reply_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=MagicMock(id=43))
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("reply", {"chat_id": 1, "reply_to_id": 10, "text": "reply"})
+        assert result["status"] == 200
+        assert result["message_id"] == 43
+        adapter.loop.close()
+
+    def test_mark_read_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.send_read_acknowledge = AsyncMock()
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("mark_read", {"chat_id": 1})
+        assert result["status"] == 200
+        mock_client.send_read_acknowledge.assert_awaited_once_with(1)
+        adapter.loop.close()
+
+    def test_edit_message_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.edit_message = AsyncMock(return_value=MagicMock(id=44))
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("edit_message", {"chat_id": 1, "message_id": 99, "text": "edited"})
+        assert result["status"] == 200
+        assert result["message_id"] == 44
+        adapter.loop.close()
+
+    def test_search_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        msg = _make_mock_message(id=55, text="found it")
+        mock_client.get_messages = AsyncMock(return_value=[msg])
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("search", {"chat_id": 1, "query": "found"})
+        assert result["status"] == 200
+        assert len(result["results"]) == 1
+        assert result["results"][0]["text"] == "found it"
+        adapter.loop.close()
+
+    def test_auth_start_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.send_code_request = AsyncMock(return_value=MagicMock(phone_code_hash="abc123"))
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("auth_start", {"phone": "+71234567890"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "code_required"
+        assert adapter._auth_state["default"]["hash"] == "abc123"
+        adapter.loop.close()
+
+    def test_auth_code_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.sign_in = AsyncMock(return_value=None)
+        adapter.clients["default"] = mock_client
+        adapter._auth_state["default"] = {"phone": "+7123", "hash": "abc"}
+
+        result = adapter.handle("auth_code", {"code": "12345"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "authorized"
+        adapter.loop.close()
+
+    def test_auth_code_password_only_async(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.sign_in = AsyncMock(return_value=None)
+        adapter.clients["default"] = mock_client
+
+        result = adapter.handle("auth_code", {"code": "", "password": "secret"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "authorized"
+        mock_client.sign_in.assert_awaited_once_with(password="secret")
+        adapter.loop.close()
+
+    def test_auth_code_2fa_with_password_async(self):
+        from telethon.errors import SessionPasswordNeededError
+
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.sign_in = AsyncMock(side_effect=[SessionPasswordNeededError(), None])
+        adapter.clients["default"] = mock_client
+        adapter._auth_state["default"] = {"phone": "+7123", "hash": "abc"}
+
+        result = adapter.handle("auth_code", {"code": "12345", "password": "mypass"})
+        assert result["status"] == 200
+        assert result["auth_status"] == "authorized"
+        adapter.loop.close()
+
+    def test_auth_logout_executes_async_body(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.log_out = AsyncMock(return_value=None)
+        adapter.clients["default"] = mock_client
+        adapter._auth_state["default"] = {"phone": "+7", "hash": "abc"}
+
+        result = adapter.handle("auth_logout", {})
+        assert result["status"] == 200
+        assert result["auth_status"] == "logged_out"
+        assert "default" not in adapter.clients
+        adapter.loop.close()
+
+    def test_start_listener_executes_async_check(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.is_user_authorized = AsyncMock(return_value=True)
+        mock_client.add_event_handler = MagicMock()
+        adapter.clients["u1"] = mock_client
+
+        adapter.start_listener("u1", lambda n: None)
+        mock_client.add_event_handler.assert_called_once()
+        adapter.loop.close()
+
+    def test_start_listener_unauthorized_skips_async(self):
+        adapter = _make_real_sync_adapter()
+        mock_client = AsyncMock()
+        mock_client.is_user_authorized = AsyncMock(return_value=False)
+        adapter.clients["u1"] = mock_client
+
+        adapter.start_listener("u1", lambda n: None)
+        mock_client.add_event_handler.assert_not_called()
+        adapter.loop.close()
