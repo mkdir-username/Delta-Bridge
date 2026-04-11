@@ -84,6 +84,8 @@ _TG_ALLOWED_KEYS: set[str] = {
     "query",
 }
 
+MAX_BODY_SIZE = 256 * 1024
+
 _auth_attempts: dict[str, list[float]] = {}
 _login_request_owners: dict[str, tuple[str, float]] = {}
 _LOGIN_OWNER_TTL: int = 600
@@ -106,6 +108,17 @@ _AUTH_WINDOW: int = 300
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         pass
+
+    def _read_body(self) -> bytes | None:
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_error(400, "Bad Content-Length")
+            return None
+        if n > MAX_BODY_SIZE:
+            self.send_error(413, "Payload too large")
+            return None
+        return self.rfile.read(n) if n > 0 else b""
 
     def _add_security_headers(self) -> None:
         import ioe_web
@@ -556,8 +569,10 @@ class Handler(BaseHTTPRequestHandler):
         import ioe_web
 
         _cleanup_login_owners()
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(content_length) if content_length else b"{}"
+        body_bytes = self._read_body()
+        if body_bytes is None:
+            return
+        raw = body_bytes if body_bytes else b"{}"
         try:
             body = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
@@ -642,8 +657,10 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_login_email_post(self) -> None:
         import ioe_web
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(content_length) if content_length else b"{}"
+        body_bytes = self._read_body()
+        if body_bytes is None:
+            return
+        raw = body_bytes if body_bytes else b"{}"
         try:
             body = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
@@ -712,8 +729,10 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
 
         if parsed.path == "/login":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body_raw = self.rfile.read(content_length).decode()
+            body_bytes = self._read_body()
+            if body_bytes is None:
+                return
+            body_raw = body_bytes.decode()
             params = parse_qs(body_raw)
             username = params.get("username", [""])[0]
             password_val = params.get("password", [""])[0]
@@ -755,8 +774,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(content_length) if content_length else b"{}"
+        body_bytes = self._read_body()
+        if body_bytes is None:
+            return
+        raw = body_bytes if body_bytes else b"{}"
         try:
             body = json.loads(raw)
         except (json.JSONDecodeError, ValueError):

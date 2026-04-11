@@ -43,6 +43,30 @@ class TestRewriteLinksScheme:
         assert "/get?url=" not in result
 
 
+class TestPostBodyLimit:
+    def test_oversize_post_returns_413(self):
+        import http.client
+        import threading
+        from http.server import HTTPServer
+        from handler import Handler, MAX_BODY_SIZE
+        import ioe_web
+
+        ioe_web.DEMO_MODE = True
+        srv = HTTPServer(("127.0.0.1", 0), Handler)
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            body = b"x" * (MAX_BODY_SIZE + 1)
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            c.request("POST", "/login/tg", body=body, headers={"Content-Type": "application/json"})
+            resp = c.getresponse()
+            assert resp.status == 413
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+
 class TestBoundedQueues:
     def test_seen_uids_lru_preserves_recent(self):
         import ioe_web
