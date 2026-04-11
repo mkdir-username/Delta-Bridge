@@ -283,7 +283,14 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
                 pass
 
 
+_DANGEROUS_HREF_RE = re.compile(
+    r"""href=(['"])\s*(?:javascript|data|vbscript|file):[^'"]*\1""",
+    re.IGNORECASE,
+)
+
+
 def rewrite_links(html: str) -> str:
+    html = _DANGEROUS_HREF_RE.sub('href="#blocked"', html)
     html = re.sub(r'href="(https?://[^"]+)"', lambda m: f'href="/get?url={m.group(1)}"', html)
     html = re.sub(r"href='(https?://[^']+)'", lambda m: f"href='/get?url={m.group(1)}'", html)
     return html
