@@ -108,12 +108,16 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _add_security_headers(self) -> None:
+        import ioe_web
+
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
+        script_src = " ".join(["'self'"] + ioe_web.SCRIPT_HASHES)
+        style_src = " ".join(["'self'"] + ioe_web.STYLE_HASHES)
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
+            f"default-src 'self'; script-src {script_src}; style-src {style_src}; img-src 'self' data: https:",
         )
 
     def respond_json(self, data: Any, code: int = 200) -> None:

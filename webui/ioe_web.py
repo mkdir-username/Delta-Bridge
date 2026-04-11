@@ -176,6 +176,24 @@ def _cleanup_pending() -> None:
 _ui_modules = [css, js_browser, js_telegram, js_claude, html_templates]
 
 
+import hashlib as _hl
+import base64 as _b64
+import re as _re
+
+
+def _inline_hashes(html: str, tag: str) -> list[str]:
+    pattern = _re.compile(rf"<{tag}[^>]*>(.*?)</{tag}>", _re.DOTALL)
+    result: list[str] = []
+    for body in pattern.findall(html):
+        digest = _hl.sha256(body.encode("utf-8")).digest()
+        result.append("'sha256-" + _b64.b64encode(digest).decode("ascii") + "'")
+    return result
+
+
+SCRIPT_HASHES: list[str] = []
+STYLE_HASHES: list[str] = []
+
+
 def _build_html():
     return (
         r"""<!DOCTYPE html>
@@ -213,14 +231,18 @@ def _build_html():
 
 
 def rebuild_html():
-    global HTML_PAGE
+    global HTML_PAGE, SCRIPT_HASHES, STYLE_HASHES
     for mod in _ui_modules:
         importlib.reload(mod)
     HTML_PAGE = _build_html()
+    SCRIPT_HASHES = _inline_hashes(HTML_PAGE, "script")
+    STYLE_HASHES = _inline_hashes(HTML_PAGE, "style")
     return HTML_PAGE
 
 
 HTML_PAGE = _build_html()
+SCRIPT_HASHES = _inline_hashes(HTML_PAGE, "script")
+STYLE_HASHES = _inline_hashes(HTML_PAGE, "style")
 
 
 def main() -> None:
