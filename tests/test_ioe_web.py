@@ -552,7 +552,7 @@ class TestNotifications:
         mock_imap.logout.return_value = None
 
         with (
-            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
         ):
             poll_thread = threading.Thread(target=transport.poll_response, args=(TEST_USER, "req123"), daemon=True)
@@ -642,13 +642,16 @@ class TestLoginCheckPhone:
 
         req_id = "loginreq1"
         login_user_id = "login"
-        h._login_request_owners[req_id] = login_user_id
+        import time as _time
+
+        h._login_request_owners[req_id] = (login_user_id, _time.time())
         with ioe_web.lock:
             ioe_web.pending[(login_user_id, req_id)] = {
                 "id": req_id,
                 "status": 200,
                 "auth_status": "code_sent",
                 "hint": "check phone",
+                "_created": _time.time(),
             }
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
@@ -711,8 +714,8 @@ class TestSendEndpoints:
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         payload = json.dumps({"action": "get_dialogs"}).encode()
         with (
-            patch("transport.imap_conn") as mock_conn,
-            patch("transport.send_request"),
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request"),
         ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
@@ -742,8 +745,8 @@ class TestSendEndpoints:
             sent_data.update(req)
 
         with (
-            patch("transport.imap_conn") as mock_conn,
-            patch("transport.send_request", side_effect=capture_send),
+            patch.object(handler, "imap_conn") as mock_conn,
+            patch.object(handler, "send_request", side_effect=capture_send),
         ):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
@@ -1282,7 +1285,7 @@ class TestPostTgEndpoint:
 
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        with patch("transport.imap_conn") as mock_conn, patch("transport.send_request"):
+        with patch.object(handler, "imap_conn") as mock_conn, patch.object(handler, "send_request"):
             mock_conn.return_value = MagicMock()
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
@@ -1320,7 +1323,7 @@ class TestPostTgEndpoint:
 
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        with patch("transport.imap_conn", side_effect=Exception("conn fail")):
+        with patch.object(handler, "imap_conn", side_effect=Exception("conn fail")):
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
             from urllib.request import Request

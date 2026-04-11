@@ -154,6 +154,24 @@ _device_seed = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
 DEVICE_ID = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
 
 seen_notification_uids = set()
+_SEEN_UIDS_MAX = 500
+_PENDING_TTL = 600
+
+
+def _trim_seen_uids() -> None:
+    if len(seen_notification_uids) > _SEEN_UIDS_MAX:
+        seen_notification_uids.clear()
+
+
+def _cleanup_pending() -> None:
+    import time as _time
+
+    cutoff = _time.time() - _PENDING_TTL
+    with lock:
+        stale = [k for k, v in pending.items() if v.get("_created", 0) < cutoff]
+        for k in stale:
+            del pending[k]
+
 
 _ui_modules = [css, js_browser, js_telegram, js_claude, html_templates]
 
