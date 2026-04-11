@@ -30,6 +30,45 @@ import threading
 _pool: dict[str, IMAPClient] = {}
 _pool_lock = threading.Lock()
 
+_poll_pool: dict[str, tuple[Any, float]] = {}
+_poll_pool_lock = threading.Lock()
+_POLL_TTL = 120.0
+
+
+def _acquire_poll_conn(user_id: str) -> Any:
+    with _poll_pool_lock:
+        entry = _poll_pool.pop(user_id, None)
+    if entry is not None:
+        conn, ts = entry
+        if time.time() - ts < _POLL_TTL:
+            try:
+                conn.noop()
+                return conn
+            except Exception:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        else:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+    return _create_conn()
+
+
+def _release_poll_conn(user_id: str, conn: Any, healthy: bool) -> None:
+    if conn is None:
+        return
+    if healthy:
+        with _poll_pool_lock:
+            _poll_pool[user_id] = (conn, time.time())
+    else:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
 
 def _create_conn() -> IMAPClient:
     import ioe_web
@@ -126,10 +165,11 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
     timing = RequestTiming(req_id)
     t0 = time.time()
     m = None
+    healthy = True
     try:
         log.info("[%s] poll: connecting IMAP...", req_id)
         with Timer() as t_conn:
-            m = _create_conn()
+            m = _acquire_poll_conn(user_id)
         timing.record("connect", t_conn.elapsed_ms)
         log.info("[%s] poll: connected (%.1fs)", req_id, time.time() - t0)
         m.select_folder("INBOX")
@@ -251,6 +291,7 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
                     pass
                 m = _create_conn()
                 m.select_folder("INBOX")
+                healthy = True
                 continue
         elapsed = time.time() - t0
         log.warning("[%s] poll: TIMEOUT after %.0fs", req_id, elapsed)
@@ -265,6 +306,7 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
     except Exception as e:
         elapsed = time.time() - t0
         log.error("[%s] poll: ERROR after %.0fs: %s", req_id, elapsed, e)
+        healthy = False
         from handler import _classify_error
 
         err_type, err_msg = _classify_error(str(e))
@@ -277,11 +319,7 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
                 "_created": time.time(),
             }
     finally:
-        if m is not None:
-            try:
-                m.logout()
-            except Exception:
-                pass
+        _release_poll_conn(user_id, m, healthy)
 
 
 _DANGEROUS_HREF_RE = re.compile(
