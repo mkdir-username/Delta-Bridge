@@ -180,11 +180,12 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
                         if response.get("type") == "notification":
                             uid_key = str(uid)
                             with ioe_web.lock:
-                                if uid_key in ioe_web.seen_notification_uids:
+                                if uid_key in ioe_web._seen_set:
                                     continue
-                                ioe_web.seen_notification_uids.add(uid_key)
+                                ioe_web.seen_notification_uids.append(uid_key)
+                                ioe_web._seen_set.add(uid_key)
                                 ioe_web._trim_seen_uids()
-                                ioe_web.notification_queues.setdefault(user_id, []).append(response)
+                            ioe_web.enqueue_notification(user_id, response)
                             continue
                         rid = response.get("id", "")
                         if rid != req_id:
