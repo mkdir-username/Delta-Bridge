@@ -43,6 +43,33 @@ class TestRewriteLinksScheme:
         assert "/get?url=" not in result
 
 
+class TestBoundedQueues:
+    def test_seen_uids_lru_preserves_recent(self):
+        import ioe_web
+
+        ioe_web.seen_notification_uids.clear()
+        ioe_web._seen_set.clear()
+        for i in range(ioe_web._SEEN_UIDS_MAX + 50):
+            uid = f"uid{i}"
+            ioe_web.seen_notification_uids.append(uid)
+            ioe_web._seen_set.add(uid)
+            ioe_web._trim_seen_uids()
+        assert len(ioe_web.seen_notification_uids) <= ioe_web._SEEN_UIDS_MAX
+        recent = f"uid{ioe_web._SEEN_UIDS_MAX + 49}"
+        assert recent in ioe_web._seen_set
+        assert "uid0" not in ioe_web._seen_set
+
+    def test_notification_queue_capped(self):
+        import ioe_web
+
+        ioe_web.notification_queues.clear()
+        for i in range(ioe_web._NOTIF_QUEUE_MAX + 20):
+            ioe_web.enqueue_notification("alice", {"i": i})
+        q = ioe_web.notification_queues["alice"]
+        assert len(q) == ioe_web._NOTIF_QUEUE_MAX
+        assert q[-1]["i"] == ioe_web._NOTIF_QUEUE_MAX + 19
+
+
 class TestGzipBombGuard:
     def test_decompress_rejects_oversize(self):
         import gzip

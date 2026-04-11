@@ -153,14 +153,27 @@ _device_seed = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
 )
 DEVICE_ID = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
 
-seen_notification_uids = set()
+from collections import deque
+
+seen_notification_uids: deque[str] = deque()
+_seen_set: set[str] = set()
 _SEEN_UIDS_MAX = 500
+_NOTIF_QUEUE_MAX = 200
 _PENDING_TTL = 600
 
 
 def _trim_seen_uids() -> None:
-    if len(seen_notification_uids) > _SEEN_UIDS_MAX:
-        seen_notification_uids.clear()
+    while len(_seen_set) > _SEEN_UIDS_MAX and seen_notification_uids:
+        old = seen_notification_uids.popleft()
+        _seen_set.discard(old)
+
+
+def enqueue_notification(user_id: str, notif: dict) -> None:
+    with lock:
+        q = notification_queues.setdefault(user_id, [])
+        q.append(notif)
+        if len(q) > _NOTIF_QUEUE_MAX:
+            del q[: len(q) - _NOTIF_QUEUE_MAX]
 
 
 def _cleanup_pending() -> None:
