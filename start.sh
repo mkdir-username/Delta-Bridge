@@ -7,26 +7,13 @@ PORT="${1:-8080}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE=""
 
-# Auto-update from git if available
+# Check for updates (info only, no auto-reset)
 if [ -d "$DIR/.git" ]; then
-  echo "Checking for updates..."
   cd "$DIR"
   if git fetch origin main --quiet 2>/dev/null; then
-    LOCAL=$(git rev-parse HEAD 2>/dev/null)
-    REMOTE=$(git rev-parse origin/main 2>/dev/null)
-    if [ "$LOCAL" != "$REMOTE" ]; then
-      COUNT=$(git log --oneline "$LOCAL".."$REMOTE" | wc -l | tr -d ' ')
-      echo "Updating $COUNT commits..."
-      if git diff --quiet 2>/dev/null && git diff --cached --quiet 2>/dev/null; then
-        git reset --hard origin/main --quiet 2>/dev/null
-      else
-        git stash --quiet 2>/dev/null
-        git reset --hard origin/main --quiet 2>/dev/null
-        git stash pop --quiet 2>/dev/null || true
-      fi
-      echo "Updated to $(git log -1 --format='%h %s')"
-    else
-      echo "Already up to date."
+    BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+    if [ "$BEHIND" -gt 0 ] 2>/dev/null; then
+      echo "Updates available ($BEHIND commits). Run: git pull origin main"
     fi
   fi
 fi
@@ -52,10 +39,19 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# Activate venv if present
+if [ -f "$DIR/.venv/bin/activate" ]; then
+  source "$DIR/.venv/bin/activate"
+fi
+
 # Check deps
-python3 -c "from Crypto.Cipher import AES" 2>/dev/null || {
-  echo "Installing pycryptodome..."
-  pip3 install pycryptodome 2>/dev/null || pip3 install --break-system-packages pycryptodome
+python3 -c "from Crypto.Cipher import AES; from imapclient import IMAPClient" 2>/dev/null || {
+  if [ -z "$VIRTUAL_ENV" ]; then
+    echo "Dependencies missing. Activate venv first: source .venv/bin/activate"
+    exit 1
+  fi
+  echo "Installing dependencies..."
+  pip3 install pycryptodome imapclient
 }
 
 # Find ioe_web.py

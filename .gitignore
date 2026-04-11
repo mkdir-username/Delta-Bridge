@@ -1,3 +1,4 @@
+.venv/
 __pycache__/
 *.pyc
 .env
@@ -10,3 +11,10 @@ __pycache__/
 HANDOVER.md
 sessions.json
 docs/superpowers/plans/
+.dev/
+.DS_Store
+.idea/
+*.swp
+*.swo
+.mypy_cache/
+.ruff_cache/

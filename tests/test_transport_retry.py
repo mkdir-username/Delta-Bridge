@@ -93,7 +93,7 @@ class TestPollResponseErrors:
         time_values = [0.0] * 200
 
         with (
-            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
             patch("time.time", side_effect=time_values),
         ):
@@ -115,7 +115,7 @@ class TestPollResponseErrors:
         time_values = [0.0] * 200
 
         with (
-            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
             patch("time.time", side_effect=time_values),
         ):
@@ -134,7 +134,7 @@ class TestPollResponseErrors:
         time_values = [0.0] * 200
 
         with (
-            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
             patch("time.time", side_effect=time_values),
         ):
@@ -159,7 +159,7 @@ class TestPollResponseErrors:
         time_values = [0.0] * 200
 
         with (
-            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
             patch("time.time", side_effect=time_values),
         ):
@@ -167,7 +167,7 @@ class TestPollResponseErrors:
 
         with ioe_web.lock:
             queue = ioe_web.notification_queues.get("user1", [])
-        assert all(n.get("msg") != "hello" or True for n in queue)
+        assert not any(n.get("msg") == "hello" for n in queue), "дубликат не должен попасть в очередь"
         ioe_web.seen_notification_uids.discard(uid_key)
 
     def test_set_flags_ошибка_при_найденном_ответе_продолжает(self):
@@ -186,7 +186,7 @@ class TestPollResponseErrors:
         time_values = [0.0] * 200
 
         with (
-            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
             patch("time.time", side_effect=time_values),
         ):
@@ -217,7 +217,7 @@ class TestPollResponseErrors:
         mock_imap.logout.return_value = None
 
         with (
-            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
             patch("time.time", return_value=0.0),
         ):
@@ -253,7 +253,7 @@ class TestPollResponseErrors:
         _handler._classify_error = fake_classify
         try:
             with (
-                patch.object(transport, "imap_conn", return_value=mock_imap),
+                patch.object(transport, "_create_conn", return_value=mock_imap),
                 patch("time.sleep"),
                 patch("time.time", side_effect=time_values),
             ):
@@ -264,6 +264,39 @@ class TestPollResponseErrors:
         assert "something broke" in classify_calls
         key = ("user1", req_id)
         assert ioe_web.pending[key]["error"] == "classified error"
+
+    def test_classify_error_исключение_не_теряет_ответ(self):
+        req_id = "req-classify-crash"
+        response_dict = {"id": req_id, "status": 500, "error": "some error"}
+        raw = _make_encrypted_email(response_dict)
+
+        mock_imap = MagicMock()
+        mock_imap.select_folder.return_value = {}
+        mock_imap.noop.return_value = None
+        mock_imap.search.return_value = [1]
+        mock_imap.fetch.return_value = {1: {b"RFC822": raw}}
+        mock_imap.set_flags.return_value = {}
+        mock_imap.expunge.return_value = None
+        mock_imap.logout.return_value = None
+        time_values = [0.0] * 200
+
+        import handler as _handler
+
+        original_classify = _handler._classify_error
+        _handler._classify_error = MagicMock(side_effect=ValueError("bad classify"))
+        try:
+            with (
+                patch.object(transport, "_create_conn", return_value=mock_imap),
+                patch("time.sleep"),
+                patch("time.time", side_effect=time_values),
+            ):
+                transport.poll_response("user1", req_id)
+        finally:
+            _handler._classify_error = original_classify
+
+        key = ("user1", req_id)
+        assert key in ioe_web.pending, "matched response must not be lost"
+        assert ioe_web.pending[key]["error"] == "some error"
 
     def test_stale_response_uids_cleaned_when_own_found(self):
         req_id = "req-cleanup"
@@ -286,7 +319,7 @@ class TestPollResponseErrors:
         time_values = [0.0] * 200
 
         with (
-            patch.object(transport, "imap_conn", return_value=mock_imap),
+            patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
             patch("time.time", side_effect=time_values),
         ):

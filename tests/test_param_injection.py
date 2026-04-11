@@ -131,7 +131,7 @@ class TestParamInjection:
         with (
             patch.object(handler, "imap_conn") as mc1,
             patch.object(handler, "send_request", side_effect=capture_send),
-            patch.object(transport_mod, "imap_conn") as mc2,
+            patch.object(transport_mod, "_create_conn") as mc2,
             patch.object(transport_mod, "send_request", side_effect=capture_send),
         ):
             mc1.return_value = MagicMock()
@@ -170,7 +170,7 @@ class TestParamInjection:
         with (
             patch.object(handler, "imap_conn") as mc1,
             patch.object(handler, "send_request", side_effect=capture_send),
-            patch.object(transport_mod, "imap_conn") as mc2,
+            patch.object(transport_mod, "_create_conn") as mc2,
             patch.object(transport_mod, "send_request", side_effect=capture_send),
             patch.object(auth, "is_whitelisted", return_value=True),
             patch.object(auth, "check_rate_limit", return_value=True),
