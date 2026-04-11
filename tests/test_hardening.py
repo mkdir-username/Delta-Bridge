@@ -43,6 +43,17 @@ class TestRewriteLinksScheme:
         assert "/get?url=" not in result
 
 
+class TestLogMasking:
+    def test_mask_url_hides_secrets(self):
+        from handler import _mask_url
+
+        assert _mask_url("https://x/a?token=abc&q=1") == "https://x/a?token=***&q=1"
+        assert _mask_url("https://x/a?password=secret") == "https://x/a?password=***"
+        assert _mask_url("https://x/a?sid=XXX") == "https://x/a?sid=***"
+        assert _mask_url("https://x/a?q=safe") == "https://x/a?q=safe"
+        assert _mask_url("https://x/a?api_key=k1&other=v") == "https://x/a?api_key=***&other=v"
+
+
 class TestSessionIdleTimeout:
     def test_session_expires_on_idle(self):
         import auth

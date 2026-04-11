@@ -88,6 +88,16 @@ _TG_ALLOWED_KEYS: set[str] = {
 
 MAX_BODY_SIZE = 256 * 1024
 
+_SECRET_QS_RE = _re.compile(
+    r"([?&](?:token|password|code|key|sid|auth|api[_-]?key)=)[^&#]*",
+    _re.IGNORECASE,
+)
+
+
+def _mask_url(url: str) -> str:
+    return _SECRET_QS_RE.sub(lambda m: m.group(1) + "***", url)
+
+
 _auth_attempts: dict[str, list[float]] = {}
 _login_request_owners: dict[str, tuple[str, float]] = {}
 _LOGIN_OWNER_TTL: int = 600
@@ -318,7 +328,7 @@ class Handler(BaseHTTPRequestHandler):
                     "[%s] send: %s %s",
                     req_id,
                     cmd,
-                    req.get("query", req.get("url", "")),
+                    _mask_url(req.get("query", req.get("url", ""))),
                 )
                 m = imap_conn()
                 send_request(m, req)
@@ -363,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
                 req["session_id"] = session_id
 
             try:
-                log.info("[%s] proxy: %s %s", req_id, method, url)
+                log.info("[%s] proxy: %s %s", req_id, method, _mask_url(url))
                 m = imap_conn()
                 send_request(m, req)
             except Exception as e:
@@ -541,7 +551,7 @@ class Handler(BaseHTTPRequestHandler):
                 "user_id": user_id,
             }
             try:
-                log.info("[%s] browser: %s", req_id, url)
+                log.info("[%s] browser: %s", req_id, _mask_url(url))
                 m = imap_conn()
                 send_request(m, req)
             except Exception as e:
