@@ -19,6 +19,7 @@ from ioe_types import OTPEntry, Whitelist, SessionStore, RateStore  # noqa: E402
 log = logging.getLogger("ioe.auth")
 
 SESSION_TTL = 2592000
+SESSION_IDLE_TTL = 86400
 RATE_LIMIT = 5
 RATE_WINDOW = 60
 _CLEANUP_INTERVAL = 60
@@ -51,6 +52,11 @@ def load_whitelist(path: str | None = None, secret: str | None = None) -> None:
 
     with open(_whitelist_path, "rb") as f:
         raw = f.read()
+
+    if secret is None and os.environ.get("IOE_REQUIRE_SIGNED_WHITELIST") == "1":
+        secret = os.environ.get("IOE_SECRET")
+        if not secret:
+            raise ValueError("IOE_REQUIRE_SIGNED_WHITELIST=1 but IOE_SECRET unset")
 
     if secret:
         sig_path = _whitelist_path + ".sig"
@@ -156,11 +162,13 @@ def get_authenticated_user(cookie_header: str | None) -> str | None:
         return None
     for stored_sid, data in _sessions.items():
         if hmac.compare_digest(stored_sid, sid):
-            if time.time() - data["last_seen"] > SESSION_TTL:
+            now = time.time()
+            created = data.get("created", now)
+            if now - created > SESSION_TTL or now - data["last_seen"] > SESSION_IDLE_TTL:
                 _sessions.pop(stored_sid, None)
                 _save_sessions()
                 return None
-            data["last_seen"] = time.time()
+            data["last_seen"] = now
             return data["user_id"]
     return None
 

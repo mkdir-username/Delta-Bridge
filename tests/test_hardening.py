@@ -43,6 +43,30 @@ class TestRewriteLinksScheme:
         assert "/get?url=" not in result
 
 
+class TestSessionIdleTimeout:
+    def test_session_expires_on_idle(self):
+        import auth
+        import time as _time
+
+        auth._sessions.clear()
+        sid = auth.create_session("alice")
+        auth._sessions[sid]["last_seen"] = _time.time() - auth.SESSION_IDLE_TTL - 1
+        assert auth.get_authenticated_user(f"sid={sid}") is None
+
+
+class TestWhitelistIntegrityRequired:
+    def test_prod_flag_requires_signature(self, monkeypatch, tmp_path):
+        import auth
+        import pytest
+
+        p = tmp_path / "users.json"
+        p.write_text('{"+79991234567": {"email": "a@a"}}')
+        monkeypatch.setenv("IOE_REQUIRE_SIGNED_WHITELIST", "1")
+        monkeypatch.setenv("IOE_SECRET", "test-secret")
+        with pytest.raises(ValueError, match="signature|sig|missing"):
+            auth.load_whitelist(str(p))
+
+
 class TestPollConnectionReuse:
     def test_second_poll_reuses_within_ttl(self):
         import transport
