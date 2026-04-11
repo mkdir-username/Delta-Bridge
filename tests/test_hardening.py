@@ -43,6 +43,36 @@ class TestRewriteLinksScheme:
         assert "/get?url=" not in result
 
 
+class TestPollConnectionReuse:
+    def test_second_poll_reuses_within_ttl(self):
+        import transport
+        import ioe_web
+        from unittest.mock import MagicMock, patch
+
+        transport._poll_pool.clear()
+        ioe_web.pending.clear()
+        mock = MagicMock()
+        mock.noop.return_value = None
+        mock.select_folder.return_value = {}
+        mock.search.return_value = []
+        calls = [0]
+
+        def create():
+            calls[0] += 1
+            return mock
+
+        time_vals = iter([float(i) for i in range(1, 2000)])
+        with (
+            patch.object(transport, "_create_conn", side_effect=create),
+            patch("time.sleep"),
+            patch("time.time", side_effect=lambda: next(time_vals)),
+        ):
+            transport.poll_response("alice", "req1", timeout=2)
+            transport.poll_response("alice", "req2", timeout=2)
+        assert calls[0] == 1, f"Second poll must reuse, calls={calls[0]}"
+        assert "alice" in transport._poll_pool
+
+
 class TestPostBodyLimit:
     def test_oversize_post_returns_413(self):
         import http.client

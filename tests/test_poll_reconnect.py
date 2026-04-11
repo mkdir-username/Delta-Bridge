@@ -1,8 +1,15 @@
 import imaplib
+import itertools
 import os
 import sys
 import types
 from unittest.mock import MagicMock, patch
+
+
+def _make_time():
+    c = itertools.count(start=0.0, step=0.001)
+    return lambda: next(c)
+
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "webui"))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -44,15 +51,17 @@ class TestNoLogoutOnPooledConnection:
 
 
 class TestPollUsesOwnConnection:
-    """Bug 4: poll_response НЕ должен использовать shared pool — thread safety."""
+    """Bug 4: poll_response НЕ должен использовать shared imap_conn() pool."""
 
     def setup_method(self):
         transport._pool.clear()
+        transport._poll_pool.clear()
         ioe_web.pending.clear()
+        ioe_web._seen_set.clear()
         ioe_web.seen_notification_uids.clear()
 
-    def test_poll_does_not_use_pool(self):
-        """poll_response создаёт dedicated connection, не трогает _pool."""
+    def test_poll_does_not_use_shared_imap_pool(self):
+        """poll_response создаёт dedicated connection, не трогает _pool (imap_conn)."""
         pool_conn = MagicMock(name="pool_conn")
         pool_conn.noop.return_value = None
         transport._pool["test@test.com@imap.yandex.ru"] = pool_conn
@@ -62,38 +71,39 @@ class TestPollUsesOwnConnection:
         poll_conn.search.return_value = []
         poll_conn.noop.return_value = None
 
-        time_values = [0.0] * 300
+        time_mock = _make_time()
 
         with (
             patch.object(transport, "_create_conn", return_value=poll_conn) as mock_create,
             patch.object(transport, "imap_conn") as mock_pool,
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=time_mock),
         ):
             transport.poll_response("user1", "req-own-conn")
 
         mock_create.assert_called_once()
         mock_pool.assert_not_called()
         poll_conn.select_folder.assert_called_with("INBOX")
-        poll_conn.logout.assert_called_once()
+        assert "user1" in transport._poll_pool
 
-    def test_poll_connection_closed_on_exit(self):
-        """poll_response закрывает свой connection при выходе (timeout или success)."""
+    def test_poll_connection_returned_to_pool_on_exit(self):
+        """poll_response возвращает connection в poll_pool при healthy exit."""
         poll_conn = MagicMock(name="poll_conn")
         poll_conn.select_folder.return_value = {}
         poll_conn.search.return_value = []
         poll_conn.noop.return_value = None
 
-        time_values = [0.0] * 300
+        time_mock = _make_time()
 
         with (
             patch.object(transport, "_create_conn", return_value=poll_conn),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=time_mock),
         ):
             transport.poll_response("user1", "req-cleanup")
 
-        poll_conn.logout.assert_called_once()
+        assert "user1" in transport._poll_pool
+        poll_conn.logout.assert_not_called()
 
 
 class TestIdleNoopFailureReconnects:
@@ -101,7 +111,9 @@ class TestIdleNoopFailureReconnects:
 
     def setup_method(self):
         transport._pool.clear()
+        transport._poll_pool.clear()
         ioe_web.pending.clear()
+        ioe_web._seen_set.clear()
         ioe_web.seen_notification_uids.clear()
 
     def test_idle_and_noop_both_fail_triggers_reconnect(self):
@@ -126,12 +138,12 @@ class TestIdleNoopFailureReconnects:
                 return mock_dead
             return mock_fresh
 
-        time_values = [0.0] * 300
+        time_mock = _make_time()
 
         with (
             patch.object(transport, "_create_conn", side_effect=fake_create),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=time_mock),
         ):
             transport.poll_response("user1", "req-idle-fail")
 
@@ -148,7 +160,9 @@ class TestMidPollReconnection:
 
     def setup_method(self):
         transport._pool.clear()
+        transport._poll_pool.clear()
         ioe_web.pending.clear()
+        ioe_web._seen_set.clear()
         ioe_web.seen_notification_uids.clear()
 
     def test_search_abort_midpoll_reconnects(self):
@@ -168,12 +182,12 @@ class TestMidPollReconnection:
         mock_fresh.logout.return_value = None
 
         conns = iter([mock_conn, mock_fresh])
-        time_values = [0.0] * 300
+        time_mock = _make_time()
 
         with (
             patch.object(transport, "_create_conn", side_effect=lambda: next(conns)),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=time_mock),
         ):
             transport.poll_response("user1", "req-abort")
 
