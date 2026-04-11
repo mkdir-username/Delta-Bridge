@@ -5,12 +5,14 @@ from __future__ import annotations
 import base64
 import gzip
 import hashlib
+import io
 import os
 
 from Crypto.Cipher import AES
 
 NONCE_SIZE = 12
 TAG_SIZE = 16
+MAX_DECOMPRESSED = 16 * 1024 * 1024
 
 
 def derive_key(secret: str) -> bytes:
@@ -50,7 +52,12 @@ def decrypt_decompress(key: bytes, b64_blob: str) -> str:
     cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
     compressed = cipher.decrypt_and_verify(ciphertext, tag)
     try:
-        decompressed = gzip.decompress(compressed)
+        with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as gz:
+            decompressed = gz.read(MAX_DECOMPRESSED + 1)
+        if len(decompressed) > MAX_DECOMPRESSED:
+            raise ValueError(f"decompressed payload too large (>{MAX_DECOMPRESSED} bytes)")
     except gzip.BadGzipFile:
+        if len(compressed) > MAX_DECOMPRESSED:
+            raise ValueError("payload too large") from None
         decompressed = compressed
     return decompressed.decode("utf-8")
