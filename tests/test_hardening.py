@@ -43,6 +43,34 @@ class TestRewriteLinksScheme:
         assert "/get?url=" not in result
 
 
+class TestGzipBombGuard:
+    def test_decompress_rejects_oversize(self):
+        import gzip
+        import os as _os
+        import base64 as _b64
+        import pytest
+        from Crypto.Cipher import AES
+        from ioe_crypto import derive_key, MAX_DECOMPRESSED, decrypt_decompress
+
+        key = derive_key("secret")
+        huge = b"A" * (MAX_DECOMPRESSED + 1024)
+        compressed = gzip.compress(huge)
+        nonce = _os.urandom(12)
+        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        ct, tag = cipher.encrypt_and_digest(compressed)
+        blob = _b64.b64encode(nonce + ct + tag).decode()
+        with pytest.raises(ValueError, match="too large"):
+            decrypt_decompress(key, blob)
+
+    def test_decompress_normal_payload_works(self):
+        from ioe_crypto import derive_key, compress_encrypt, decrypt_decompress
+
+        key = derive_key("secret")
+        plaintext = "hello world " * 100
+        blob = compress_encrypt(key, plaintext)
+        assert decrypt_decompress(key, blob) == plaintext
+
+
 class TestCSPNoUnsafeInline:
     def test_csp_does_not_contain_unsafe_inline(self):
         import ioe_web
