@@ -1,6 +1,8 @@
 """IoE HTTP request handler."""
 
 from __future__ import annotations
+import hashlib
+import hmac
 import sys
 import os
 
@@ -592,7 +594,7 @@ class Handler(BaseHTTPRequestHandler):
         phone = body.get("phone", "")
 
         if action == "auth_start" and not auth.is_whitelisted(phone):
-            time.sleep(2)
+            _ = hmac.new(b"honeypot-pad", phone.encode(), hashlib.sha256).digest()
             req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             login_user_id = phone or "login"
             with ioe_web.lock:
@@ -672,7 +674,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if action == "send_code":
             if not auth.is_whitelisted(phone):
-                time.sleep(2)
+                _ = hmac.new(b"honeypot-pad", phone.encode(), hashlib.sha256).digest()
                 self.respond_json({"status": "code_sent"})
                 return
 
