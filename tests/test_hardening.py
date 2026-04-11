@@ -41,3 +41,20 @@ class TestRewriteLinksScheme:
         result = rewrite_links(html)
         assert "/local/path" in result
         assert "/get?url=" not in result
+
+
+class TestCSPNoUnsafeInline:
+    def test_csp_does_not_contain_unsafe_inline(self):
+        import ioe_web
+        from handler import Handler
+
+        assert hasattr(ioe_web, "SCRIPT_HASHES")
+        assert hasattr(ioe_web, "STYLE_HASHES")
+        h = Handler.__new__(Handler)
+        captured: dict[str, str] = {}
+        h.send_header = lambda k, v: captured.setdefault(k, v)  # type: ignore[method-assign]
+        h._add_security_headers()
+        csp = captured.get("Content-Security-Policy", "")
+        assert "unsafe-inline" not in csp
+        assert "sha256-" in csp
+        assert "'self'" in csp
