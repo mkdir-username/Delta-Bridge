@@ -351,4 +351,19 @@ function runKit() {
   content.innerHTML = '<div class="loading"><div class="spinner"></div><div>Running ' + escHtml(kit.service) + '.' + escHtml(action) + '...</div></div>';
 }
 loadKits();
+
+document.addEventListener('click', function(e) {
+  var t = e.target.closest('[data-action]');
+  if (!t) return;
+  var a = t.dataset.action;
+  if (a === 'go') go();
+  else if (a === 'toggle-browser-mode') toggleBrowserMode();
+  else if (a === 'scroll-top') window.scrollTo({top:0,behavior:'smooth'});
+  else if (a === 'switch-tab-browser') switchTab('browser');
+  else if (a === 'switch-tab-telegram') switchTab('telegram');
+  else if (a === 'switch-tab-claude') switchTab('claude');
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && e.target.id === 'url') go();
+});
 """

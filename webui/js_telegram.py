@@ -582,4 +582,30 @@ function handleAuth2FAResult(data) {
 
 bgCheckTgAuth();
 
+document.addEventListener('click', function(e) {
+  var t = e.target.closest('[data-action]');
+  if (!t) return;
+  var a = t.dataset.action;
+  if (a === 'tg-auth-start') authStart();
+  else if (a === 'tg-auth-code') authCode();
+  else if (a === 'tg-auth-2fa') auth2FA();
+  else if (a === 'tg-logout') logoutTelegram();
+  else if (a === 'cancel-reply') cancelReply();
+  else if (a === 'send-tg-message') sendTgMessage();
+  else if (a.startsWith('set-folder-')) setFolder(a.replace('set-folder-', ''));
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter') return;
+  var t = e.target.closest('[data-enter]');
+  if (!t) return;
+  var a = t.dataset.enter;
+  if (a === 'tg-auth-start') authStart();
+  else if (a === 'tg-auth-code') authCode();
+  else if (a === 'tg-auth-2fa') auth2FA();
+  else if (a === 'send-tg-message') sendTgMessage();
+});
+document.addEventListener('input', function(e) {
+  if (e.target.closest('[data-input="filter-chats"]')) filterChats();
+});
+
 """

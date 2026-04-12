@@ -18,6 +18,7 @@ def login_page(error: str = "") -> str:
 *, *::before, *::after {{ box-sizing:border-box; margin:0; padding:0; }}
 html {{ background:var(--bg-base); color:var(--text-main); height:100%; }}
 body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Arial,sans-serif; height:100%; }}
+.hidden {{ display: none; }}
 {login_css()}
 </style>
 </head>
@@ -30,16 +31,16 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Aria
   <div id="step-phone" class="login-form">
     <div class="login-hint">\u041a\u043e\u0434 \u043f\u0440\u0438\u0434\u0451\u0442 \u043d\u0430 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u043d\u044b\u0439 email</div>
     <input type="tel" id="phone" placeholder="+7XXXXXXXXXX" value="+7"
-           onkeydown="if(event.key===\'Enter\')authStart()">
-    <button onclick="authStart()">\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434</button>
+           data-enter="login-auth-start">
+    <button data-action="login-auth-start">\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434</button>
     <div id="phone-error" class="login-error"></div>
   </div>
 
-  <div id="step-code" class="login-form" style="display:none">
+  <div id="step-code" class="login-form hidden">
     <div class="login-hint" id="code-hint">\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043a\u043e\u0434 \u0438\u0437 email</div>
     <input type="text" id="code" placeholder="12345" maxlength="5" inputmode="numeric"
-           onkeydown="if(event.key===\'Enter\')authCode()">
-    <button onclick="authCode()">\u0412\u043e\u0439\u0442\u0438</button>
+           data-enter="login-auth-code">
+    <button data-action="login-auth-code">\u0412\u043e\u0439\u0442\u0438</button>
     <div id="code-error" class="login-error"></div>
   </div>
 </div>
@@ -49,7 +50,8 @@ var currentPhone = \'\';
 
 function showStep(name) {{
   [\'phone\',\'code\'].forEach(function(s) {{
-    document.getElementById(\'step-\'+s).style.display = s===name ? \'\' : \'none\';
+    var el = document.getElementById(\'step-\'+s);
+    if (s===name) el.classList.remove(\'hidden\'); else el.classList.add(\'hidden\');
   }});
 }}
 
@@ -105,15 +107,31 @@ function authCode() {{
       document.getElementById(\'code-error\').textContent = \'\u041d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438 \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043e\u043c\';
     }});
 }}
+
+document.addEventListener(\'click\', function(e) {{
+  var t = e.target.closest(\'[data-action]\');
+  if (!t) return;
+  var a = t.dataset.action;
+  if (a === \'login-auth-start\') authStart();
+  else if (a === \'login-auth-code\') authCode();
+}});
+document.addEventListener(\'keydown\', function(e) {{
+  if (e.key !== \'Enter\') return;
+  var t = e.target.closest(\'[data-enter]\');
+  if (!t) return;
+  var a = t.dataset.enter;
+  if (a === \'login-auth-start\') authStart();
+  else if (a === \'login-auth-code\') authCode();
+}});
 </script>
 </body>
 </html>"""
 
 
 HTML_TAB_BAR = """<div class="tab-bar">
-  <button class="tab active" onclick="switchTab('browser')" id="tab-browser">Browser</button>
-  <button class="tab" onclick="switchTab('telegram')" id="tab-telegram">Telegram<span class="notif-badge" id="notif-badge" style="display:none"></span></button>
-  <button class="tab" onclick="switchTab('claude')" id="tab-claude">Claude</button>
+  <button class="tab active" data-action="switch-tab-browser" id="tab-browser">Browser</button>
+  <button class="tab" data-action="switch-tab-telegram" id="tab-telegram">Telegram<span class="notif-badge hidden" id="notif-badge"></span></button>
+  <button class="tab" data-action="switch-tab-claude" id="tab-claude">Claude</button>
 </div>
 """
 
@@ -121,8 +139,8 @@ HTML_BROWSER = """<div id="browser-view">
 <div class="toolbar">
   <input type="text" id="url" placeholder="URL или поисковый запрос..."
          autocomplete="off" autocapitalize="off" spellcheck="false" value="">
-  <button id="btnBrowser" class="toolbar-toggle" onclick="toggleBrowserMode()" title="Browser mode">&#127760;</button>
-  <button id="btnGo" onclick="go()">&rarr;</button>
+  <button id="btnBrowser" class="toolbar-toggle" data-action="toggle-browser-mode" title="Browser mode">&#127760;</button>
+  <button id="btnGo" data-action="go">&rarr;</button>
 </div>
 
 <main id="content">
@@ -133,7 +151,7 @@ HTML_BROWSER = """<div id="browser-view">
   </div>
 </main>
 
-<button class="scroll-top" id="scrollTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">&uarr;</button>
+<button class="scroll-top" id="scrollTop" data-action="scroll-top">&uarr;</button>
 
 <footer>
   <div class="status">
@@ -145,40 +163,40 @@ HTML_BROWSER = """<div id="browser-view">
 </div>
 """
 
-HTML_TELEGRAM = """<div id="telegram-view" style="display:none">
+HTML_TELEGRAM = """<div id="telegram-view" class="hidden">
   <div class="tg-layout">
     <div class="tg-sidebar">
       <div class="tg-sidebar-top">
-        <input type="text" class="tg-search" id="tg-search" placeholder="Search chats..." oninput="filterChats()">
+        <input type="text" class="tg-search" id="tg-search" placeholder="Search chats..." data-input="filter-chats">
       </div>
       <div class="tg-folders" id="tg-folders">
-        <button class="tg-folder active" data-folder="user" onclick="setFolder('user')">Private</button>
-        <button class="tg-folder" data-folder="group" onclick="setFolder('group')">Groups</button>
-        <button class="tg-folder" data-folder="channel" onclick="setFolder('channel')">Channels</button>
-        <button class="tg-folder" data-folder="all" onclick="setFolder('all')">All</button>
-        <button class="tg-folder" data-folder="unread" onclick="setFolder('unread')">Unread</button>
+        <button class="tg-folder active" data-folder="user" data-action="set-folder-user">Private</button>
+        <button class="tg-folder" data-folder="group" data-action="set-folder-group">Groups</button>
+        <button class="tg-folder" data-folder="channel" data-action="set-folder-channel">Channels</button>
+        <button class="tg-folder" data-folder="all" data-action="set-folder-all">All</button>
+        <button class="tg-folder" data-folder="unread" data-action="set-folder-unread">Unread</button>
       </div>
-      <div id="tg-auth" style="display:none">
+      <div id="tg-auth" class="hidden">
         <div id="auth-step-phone" class="auth-step">
           <div class="auth-title">Telegram</div>
           <div class="auth-hint">Код придёт в SMS, доступ к TG не нужен</div>
           <input type="tel" id="auth-phone" placeholder="+7XXXXXXXXXX" value="+7" class="tg-search"
-                 onkeydown="if(event.key==='Enter')authStart()">
-          <button onclick="authStart()" class="auth-btn">Отправить код</button>
+                 data-enter="tg-auth-start">
+          <button data-action="tg-auth-start" class="auth-btn">Отправить код</button>
           <div id="auth-phone-error" class="auth-error"></div>
         </div>
-        <div id="auth-step-code" class="auth-step" style="display:none">
+        <div id="auth-step-code" class="auth-step hidden">
           <div class="auth-title">Код из SMS</div>
           <input type="text" id="auth-code" placeholder="12345" class="tg-search"
-                 maxlength="6" inputmode="numeric" onkeydown="if(event.key==='Enter')authCode()">
-          <button onclick="authCode()" class="auth-btn">Подтвердить</button>
+                 maxlength="6" inputmode="numeric" data-enter="tg-auth-code">
+          <button data-action="tg-auth-code" class="auth-btn">Подтвердить</button>
           <div id="auth-code-error" class="auth-error"></div>
         </div>
-        <div id="auth-step-2fa" class="auth-step" style="display:none">
+        <div id="auth-step-2fa" class="auth-step hidden">
           <div class="auth-title">Двухфакторный пароль</div>
           <input type="password" id="auth-password" placeholder="Пароль" class="tg-search"
-                 onkeydown="if(event.key==='Enter')auth2FA()">
-          <button onclick="auth2FA()" class="auth-btn">Войти</button>
+                 data-enter="tg-auth-2fa">
+          <button data-action="tg-auth-2fa" class="auth-btn">Войти</button>
           <div id="auth-2fa-error" class="auth-error"></div>
         </div>
       </div>
@@ -186,7 +204,7 @@ HTML_TELEGRAM = """<div id="telegram-view" style="display:none">
         <div class="loading"><div class="spinner"></div><div>Loading chats...</div><div class="timer">0.0s</div></div>
       </div>
       <div class="tg-sidebar-bottom" id="tg-sidebar-bottom">
-        <button id="tg-logout-btn" class="tg-logout-btn" onclick="logoutTelegram()">Выйти</button>
+        <button id="tg-logout-btn" class="tg-logout-btn" data-action="tg-logout">Выйти</button>
       </div>
     </div>
     <div class="tg-main">
@@ -196,13 +214,13 @@ HTML_TELEGRAM = """<div id="telegram-view" style="display:none">
       <div class="tg-messages" id="tg-messages">
         <div class="tg-empty">Select a chat to start messaging</div>
       </div>
-      <div class="tg-reply-bar" id="tg-reply-bar" style="display:none">
+      <div class="tg-reply-bar hidden" id="tg-reply-bar">
         Replying to <span id="tg-reply-to"></span>
-        <button onclick="cancelReply()" style="background:none;border:none;color:var(--text-muted);cursor:pointer">&#10005;</button>
+        <button data-action="cancel-reply" class="cancel-reply-btn">&#10005;</button>
       </div>
       <div class="tg-compose">
-        <input type="text" id="tg-input" placeholder="Message..." onkeydown="if(event.key==='Enter')sendTgMessage()">
-        <button onclick="sendTgMessage()">Send</button>
+        <input type="text" id="tg-input" placeholder="Message..." data-enter="send-tg-message">
+        <button data-action="send-tg-message">Send</button>
       </div>
     </div>
   </div>
@@ -210,17 +228,17 @@ HTML_TELEGRAM = """<div id="telegram-view" style="display:none">
 
 """
 
-HTML_CLAUDE = """<div id="claude-view" style="display:none">
+HTML_CLAUDE = """<div id="claude-view" class="hidden">
   <div class="claude-layout">
-    <div class="claude-auth" id="claude-auth" style="display:none">
+    <div class="claude-auth hidden" id="claude-auth">
       <div class="claude-auth-box">
         <div class="claude-auth-title">Claude Chat</div>
         <div class="claude-auth-desc">Checking authorization...</div>
-        <button class="claude-auth-btn" id="claude-login-btn" style="display:none">Login</button>
-        <div id="claude-auth-url" style="display:none"></div>
+        <button class="claude-auth-btn hidden" id="claude-login-btn">Login</button>
+        <div class="hidden" id="claude-auth-url"></div>
       </div>
     </div>
-    <div class="claude-chat" id="claude-chat" style="display:none">
+    <div class="claude-chat hidden" id="claude-chat">
       <div class="claude-header">
         <span class="claude-title">Claude</span>
         <span class="claude-model-label" id="claude-model-label"></span>
