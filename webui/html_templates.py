@@ -38,7 +38,7 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Aria
 
   <div id="step-code" class="login-form hidden">
     <div class="login-hint" id="code-hint">\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043a\u043e\u0434 \u0438\u0437 email</div>
-    <input type="text" id="code" placeholder="12345" maxlength="5" inputmode="numeric"
+    <input type="text" id="code" placeholder="123456" maxlength="6" inputmode="numeric"
            data-enter="login-auth-code">
     <button data-action="login-auth-code">\u0412\u043e\u0439\u0442\u0438</button>
     <div id="code-error" class="login-error"></div>
