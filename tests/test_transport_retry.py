@@ -49,6 +49,7 @@ def _make_encrypted_email(response_dict: dict) -> bytes:
 class TestImapConnRetry:
     def setup_method(self):
         transport._pool.clear()
+        transport._poll_pool.clear()
 
     def test_первое_подключение_успешно(self):
         mock_client = MagicMock()
