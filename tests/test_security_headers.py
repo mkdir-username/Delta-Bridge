@@ -17,16 +17,6 @@ import auth
 _real_get_auth = auth.get_authenticated_user
 
 
-def setup_module(module):
-    auth.get_authenticated_user = lambda cookie_header: "testuser"
-    ioe_web.DEMO_MODE = True
-
-
-def teardown_module(module):
-    auth.get_authenticated_user = _real_get_auth
-    ioe_web.DEMO_MODE = False
-
-
 def _get_response(port, path="/search?q=test"):
     server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
     t = threading.Thread(target=server.handle_request, daemon=True)
@@ -37,6 +27,14 @@ def _get_response(port, path="/search?q=test"):
 
 
 class TestSecurityHeaders:
+    def setup_method(self):
+        auth.get_authenticated_user = lambda cookie_header: "testuser"
+        ioe_web.DEMO_MODE = True
+
+    def teardown_method(self):
+        auth.get_authenticated_user = _real_get_auth
+        ioe_web.DEMO_MODE = False
+
     def test_nosniff_header(self, free_port):
         resp = _get_response(free_port)
         assert resp.headers.get("X-Content-Type-Options") == "nosniff"
