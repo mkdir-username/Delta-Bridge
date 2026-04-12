@@ -1,8 +1,16 @@
+import itertools
 import os
 import sys
 import json
 import types
 from unittest.mock import MagicMock, patch
+
+
+def _make_time():
+    c = itertools.count(start=0.0, step=0.001)
+    return lambda: next(c)
+
+
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
@@ -81,7 +89,9 @@ class TestImapConnRetry:
 class TestPollResponseErrors:
     def setup_method(self):
         ioe_web.pending.clear()
+        ioe_web._seen_set.clear()
         ioe_web.seen_notification_uids.clear()
+        transport._poll_pool.clear()
 
     def test_fetch_возвращает_пустой_dict_продолжает_цикл(self):
         mock_imap = MagicMock()
@@ -90,12 +100,10 @@ class TestPollResponseErrors:
         mock_imap.search.return_value = [1]
         mock_imap.fetch.return_value = {}
         mock_imap.logout.return_value = None
-        time_values = [0.0] * 200
-
         with (
             patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=_make_time()),
         ):
             transport.poll_response("user1", "req-none")
 
@@ -112,12 +120,10 @@ class TestPollResponseErrors:
         fake_raw = b"From: x\r\n\r\nbody"
         mock_imap.fetch.return_value = {1: {b"RFC822": fake_raw}}
         mock_imap.logout.return_value = None
-        time_values = [0.0] * 200
-
         with (
             patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=_make_time()),
         ):
             transport.poll_response("user1", "req-bad-decrypt")
 
@@ -131,12 +137,10 @@ class TestPollResponseErrors:
         mock_imap.noop.return_value = None
         mock_imap.search.return_value = []
         mock_imap.logout.return_value = None
-        time_values = [0.0] * 200
-
         with (
             patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=_make_time()),
         ):
             transport.poll_response("user1", "req-empty")
 
@@ -146,7 +150,8 @@ class TestPollResponseErrors:
 
     def test_дублированное_уведомление_пропускается(self):
         uid_key = "42"
-        ioe_web.seen_notification_uids.add(uid_key)
+        ioe_web.seen_notification_uids.append(uid_key)
+        ioe_web._seen_set.add(uid_key)
         notification = {"type": "notification", "msg": "hello"}
         raw = _make_encrypted_email(notification)
 
@@ -156,19 +161,17 @@ class TestPollResponseErrors:
         mock_imap.search.return_value = [42]
         mock_imap.fetch.return_value = {42: {b"RFC822": raw}}
         mock_imap.logout.return_value = None
-        time_values = [0.0] * 200
-
         with (
             patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=_make_time()),
         ):
             transport.poll_response("user1", "req-dup-notif")
 
         with ioe_web.lock:
             queue = ioe_web.notification_queues.get("user1", [])
         assert not any(n.get("msg") == "hello" for n in queue), "дубликат не должен попасть в очередь"
-        ioe_web.seen_notification_uids.discard(uid_key)
+        ioe_web._seen_set.discard(uid_key)
 
     def test_set_flags_ошибка_при_найденном_ответе_продолжает(self):
         req_id = "req-store-err"
@@ -183,12 +186,10 @@ class TestPollResponseErrors:
         mock_imap.set_flags.side_effect = Exception("store failed")
         mock_imap.expunge.return_value = None
         mock_imap.logout.return_value = None
-        time_values = [0.0] * 200
-
         with (
             patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=_make_time()),
         ):
             transport.poll_response("user1", req_id)
 
@@ -219,7 +220,7 @@ class TestPollResponseErrors:
         with (
             patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
-            patch("time.time", return_value=0.0),
+            patch("time.time", side_effect=_make_time()),
         ):
             transport.poll_response("user1", "req-old-cleanup")
 
@@ -239,8 +240,6 @@ class TestPollResponseErrors:
         mock_imap.set_flags.return_value = {}
         mock_imap.expunge.return_value = None
         mock_imap.logout.return_value = None
-        time_values = [0.0] * 200
-
         import handler as _handler
 
         original_classify = _handler._classify_error
@@ -255,7 +254,7 @@ class TestPollResponseErrors:
             with (
                 patch.object(transport, "_create_conn", return_value=mock_imap),
                 patch("time.sleep"),
-                patch("time.time", side_effect=time_values),
+                patch("time.time", side_effect=_make_time()),
             ):
                 transport.poll_response("user1", req_id)
         finally:
@@ -278,8 +277,6 @@ class TestPollResponseErrors:
         mock_imap.set_flags.return_value = {}
         mock_imap.expunge.return_value = None
         mock_imap.logout.return_value = None
-        time_values = [0.0] * 200
-
         import handler as _handler
 
         original_classify = _handler._classify_error
@@ -288,7 +285,7 @@ class TestPollResponseErrors:
             with (
                 patch.object(transport, "_create_conn", return_value=mock_imap),
                 patch("time.sleep"),
-                patch("time.time", side_effect=time_values),
+                patch("time.time", side_effect=_make_time()),
             ):
                 transport.poll_response("user1", req_id)
         finally:
@@ -316,12 +313,10 @@ class TestPollResponseErrors:
         mock_imap.set_flags.return_value = {}
         mock_imap.expunge.return_value = None
         mock_imap.logout.return_value = None
-        time_values = [0.0] * 200
-
         with (
             patch.object(transport, "_create_conn", return_value=mock_imap),
             patch("time.sleep"),
-            patch("time.time", side_effect=time_values),
+            patch("time.time", side_effect=_make_time()),
         ):
             transport.poll_response("user1", req_id)
 

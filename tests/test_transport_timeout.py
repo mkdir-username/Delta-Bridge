@@ -21,6 +21,7 @@ import transport
 class TestTransportTimeout:
     def setup_method(self):
         ioe_web.pending.clear()
+        transport._poll_pool.clear()
 
     def test_poll_response_timeout_504(self):
         mock_imap = MagicMock()
@@ -47,9 +48,16 @@ class TestTransportTimeout:
         assert result["status"] == 504
 
     def test_poll_response_exception_500(self):
+        clock = [0.0]
+
+        def fake_time():
+            val = clock[0]
+            clock[0] += 5.0
+            return val
+
         with (
             patch.object(transport, "_create_conn", side_effect=ConnectionError("down")),
-            patch("time.time", return_value=0.0),
+            patch("time.time", side_effect=fake_time),
         ):
             transport.poll_response("user1", "req-err")
         key = ("user1", "req-err")
