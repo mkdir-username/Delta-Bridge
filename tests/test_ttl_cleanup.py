@@ -54,21 +54,32 @@ class TestLoginRequestOwnersTTL:
 class TestSeenNotificationUidsCap:
     """seen_notification_uids очищается при превышении 500."""
 
-    def test_clear_when_exceeds_limit(self):
+    def test_lru_trims_to_limit(self):
         import webui.ioe_web as ioe_web
         from webui.ioe_web import _trim_seen_uids
 
-        ioe_web.seen_notification_uids = set(str(i) for i in range(501))
-        _trim_seen_uids()
-        assert len(ioe_web.seen_notification_uids) == 0
+        ioe_web.seen_notification_uids.clear()
+        ioe_web._seen_set.clear()
+        for i in range(ioe_web._SEEN_UIDS_MAX + 50):
+            uid = str(i)
+            ioe_web.seen_notification_uids.append(uid)
+            ioe_web._seen_set.add(uid)
+            _trim_seen_uids()
+        assert len(ioe_web._seen_set) <= ioe_web._SEEN_UIDS_MAX
+        assert str(ioe_web._SEEN_UIDS_MAX + 49) in ioe_web._seen_set
 
-    def test_no_clear_under_limit(self):
+    def test_no_trim_under_limit(self):
         import webui.ioe_web as ioe_web
         from webui.ioe_web import _trim_seen_uids
 
-        ioe_web.seen_notification_uids = set(str(i) for i in range(100))
+        ioe_web.seen_notification_uids.clear()
+        ioe_web._seen_set.clear()
+        for i in range(100):
+            uid = str(i)
+            ioe_web.seen_notification_uids.append(uid)
+            ioe_web._seen_set.add(uid)
         _trim_seen_uids()
-        assert len(ioe_web.seen_notification_uids) == 100
+        assert len(ioe_web._seen_set) == 100
 
 
 class TestPendingTTL:

@@ -24,6 +24,7 @@ def setup_module(module):
 
 def teardown_module(module):
     auth.get_authenticated_user = _real_get_auth
+    ioe_web.DEMO_MODE = False
 
 
 def _get_response(port, path="/search?q=test"):
