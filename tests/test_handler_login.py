@@ -166,6 +166,15 @@ class TestLoginTgPost:
             status, body = post_json(port, "/login/tg", {"action": "hack"})
         assert body["status"] == "error"
 
+    def test_tg_auth_ip_rate_limited(self):
+        """IP rate limit превышен → error."""
+        port = get_free_port()
+        with patch.object(auth, "check_rate_limit", return_value=False):
+            status, body = post_json(port, "/login/tg", {"action": "auth_start", "phone": "+79001234567"})
+        assert status == 200
+        assert body["status"] == "error"
+        assert "одожд" in body["error"].lower() or "минут" in body["error"].lower()
+
     def test_tg_imap_error(self):
         """Ошибка IMAP при send → возвращает error."""
         port = get_free_port()

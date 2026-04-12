@@ -153,9 +153,58 @@ _device_seed = os.environ.get("IOE_DEVICE_ID", "") or "{}@{}".format(
 )
 DEVICE_ID = _hashlib.sha256(_device_seed.encode()).hexdigest()[:4]
 
-seen_notification_uids = set()
+from collections import deque
+
+seen_notification_uids: deque[str] = deque()
+_seen_set: set[str] = set()
+_SEEN_UIDS_MAX = 500
+_NOTIF_QUEUE_MAX = 200
+_PENDING_TTL = 600
+
+
+def _trim_seen_uids() -> None:
+    while len(_seen_set) > _SEEN_UIDS_MAX and seen_notification_uids:
+        old = seen_notification_uids.popleft()
+        _seen_set.discard(old)
+
+
+def enqueue_notification(user_id: str, notif: dict) -> None:
+    with lock:
+        q = notification_queues.setdefault(user_id, [])
+        q.append(notif)
+        if len(q) > _NOTIF_QUEUE_MAX:
+            del q[: len(q) - _NOTIF_QUEUE_MAX]
+
+
+def _cleanup_pending() -> None:
+    import time as _time
+
+    cutoff = _time.time() - _PENDING_TTL
+    with lock:
+        stale = [k for k, v in pending.items() if v.get("_created", 0) < cutoff]
+        for k in stale:
+            del pending[k]
+
 
 _ui_modules = [css, js_browser, js_telegram, js_claude, html_templates]
+
+
+import hashlib as _hl
+import base64 as _b64
+import re as _re
+
+
+def _inline_hashes(html: str, tag: str) -> list[str]:
+    pattern = _re.compile(rf"<{tag}[^>]*>(.*?)</{tag}>", _re.DOTALL)
+    result: list[str] = []
+    for body in pattern.findall(html):
+        digest = _hl.sha256(body.encode("utf-8")).digest()
+        result.append("'sha256-" + _b64.b64encode(digest).decode("ascii") + "'")
+    return result
+
+
+SCRIPT_HASHES: list[str] = []
+STYLE_HASHES: list[str] = []
 
 
 def _build_html():
@@ -195,14 +244,18 @@ def _build_html():
 
 
 def rebuild_html():
-    global HTML_PAGE
+    global HTML_PAGE, SCRIPT_HASHES, STYLE_HASHES
     for mod in _ui_modules:
         importlib.reload(mod)
     HTML_PAGE = _build_html()
+    SCRIPT_HASHES = _inline_hashes(HTML_PAGE, "script")
+    STYLE_HASHES = _inline_hashes(HTML_PAGE, "style")
     return HTML_PAGE
 
 
 HTML_PAGE = _build_html()
+SCRIPT_HASHES = _inline_hashes(HTML_PAGE, "script")
+STYLE_HASHES = _inline_hashes(HTML_PAGE, "style")
 
 
 def main() -> None:

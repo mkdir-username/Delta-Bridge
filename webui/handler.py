@@ -1,6 +1,8 @@
 """IoE HTTP request handler."""
 
 from __future__ import annotations
+import hashlib
+import hmac
 import sys
 import os
 
@@ -84,8 +86,30 @@ _TG_ALLOWED_KEYS: set[str] = {
     "query",
 }
 
+MAX_BODY_SIZE = 256 * 1024
+
+_SECRET_QS_RE = _re.compile(
+    r"([?&](?:token|password|code|key|sid|auth|api[_-]?key)=)[^&#]*",
+    _re.IGNORECASE,
+)
+
+
+def _mask_url(url: str) -> str:
+    return _SECRET_QS_RE.sub(lambda m: m.group(1) + "***", url)
+
+
 _auth_attempts: dict[str, list[float]] = {}
-_login_request_owners: dict[str, str] = {}
+_login_request_owners: dict[str, tuple[str, float]] = {}
+_LOGIN_OWNER_TTL: int = 600
+
+
+def _cleanup_login_owners() -> None:
+    cutoff = time.time() - _LOGIN_OWNER_TTL
+    stale = [k for k, (_, ts) in _login_request_owners.items() if ts < cutoff]
+    for k in stale:
+        del _login_request_owners[k]
+
+
 _code_attempts: dict[str, list[float]] = {}
 _CODE_LIMIT: int = 5
 _CODE_WINDOW: int = 300
@@ -97,10 +121,29 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         pass
 
+    def _read_body(self) -> bytes | None:
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_error(400, "Bad Content-Length")
+            return None
+        if n > MAX_BODY_SIZE:
+            self.send_error(413, "Payload too large")
+            return None
+        return self.rfile.read(n) if n > 0 else b""
+
     def _add_security_headers(self) -> None:
+        import ioe_web
+
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
+        script_src = " ".join(["'self'"] + ioe_web.SCRIPT_HASHES)
+        style_src = " ".join(["'self'"] + ioe_web.STYLE_HASHES)
+        self.send_header(
+            "Content-Security-Policy",
+            f"default-src 'self'; script-src {script_src}; style-src {style_src}; img-src 'self' data: https:",
+        )
 
     def respond_json(self, data: Any, code: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -166,8 +209,10 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"status": "error", "error": "use POST"}, 405)
             return
         if parsed.path == "/login/status":
+            ioe_web._cleanup_pending()
             req_id = qs.get("id", [""])[0]
-            login_user_id = _login_request_owners.get(req_id, "login")
+            _owner_entry = _login_request_owners.get(req_id)
+            login_user_id = _owner_entry[0] if _owner_entry else "login"
             with ioe_web.lock:
                 if (login_user_id, req_id) in ioe_web.pending:
                     resp = ioe_web.pending.pop((login_user_id, req_id))
@@ -186,6 +231,7 @@ class Handler(BaseHTTPRequestHandler):
                             "Set-Cookie",
                             f"sid={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={auth.SESSION_TTL}",
                         )
+                        self._add_security_headers()
                         self.end_headers()
                         self.wfile.write(body)
                         return
@@ -198,6 +244,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header("Location", "/login")
             self.send_header("Set-Cookie", "sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+            self._add_security_headers()
             self.end_headers()
             return
 
@@ -205,6 +252,7 @@ class Handler(BaseHTTPRequestHandler):
         if not user_id:
             self.send_response(302)
             self.send_header("Location", "/login")
+            self._add_security_headers()
             self.end_headers()
             return
 
@@ -280,11 +328,10 @@ class Handler(BaseHTTPRequestHandler):
                     "[%s] send: %s %s",
                     req_id,
                     cmd,
-                    req.get("query", req.get("url", "")),
+                    _mask_url(req.get("query", req.get("url", ""))),
                 )
                 m = imap_conn()
                 send_request(m, req)
-                m.logout()
                 log.info("[%s] send: done (%.1fs)", req_id, time.time() - t0)
             except Exception as e:
                 log.error("[%s] send: FAILED: %s", req_id, e)
@@ -326,10 +373,9 @@ class Handler(BaseHTTPRequestHandler):
                 req["session_id"] = session_id
 
             try:
-                log.info("[%s] proxy: %s %s", req_id, method, url)
+                log.info("[%s] proxy: %s %s", req_id, method, _mask_url(url))
                 m = imap_conn()
                 send_request(m, req)
-                m.logout()
             except Exception as e:
                 log.error("[%s] proxy send FAILED: %s", req_id, e)
                 err_type, err_msg = _classify_error(str(e))
@@ -375,7 +421,6 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("[%s] tg: %s", req_id, action)
                 m = imap_conn()
                 send_request(m, req)
-                m.logout()
             except Exception as e:
                 log.error("[%s] tg send FAILED: %s", req_id, e)
                 err_type, err_msg = _classify_error(str(e))
@@ -408,7 +453,6 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("[%s] claude: %s", req_id, action)
                 m = imap_conn()
                 send_request(m, req)
-                m.logout()
             except Exception as e:
                 log.error("[%s] claude send FAILED: %s", req_id, e)
                 err_type, err_msg = _classify_error(str(e))
@@ -480,7 +524,6 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("[%s] browser-search: %s", req_id, q)
                 m = imap_conn()
                 send_request(m, req)
-                m.logout()
             except Exception as e:
                 log.error("[%s] browser-search send FAILED: %s", req_id, e)
                 err_type, err_msg = _classify_error(str(e))
@@ -508,10 +551,9 @@ class Handler(BaseHTTPRequestHandler):
                 "user_id": user_id,
             }
             try:
-                log.info("[%s] browser: %s", req_id, url)
+                log.info("[%s] browser: %s", req_id, _mask_url(url))
                 m = imap_conn()
                 send_request(m, req)
-                m.logout()
             except Exception as e:
                 log.error("[%s] browser send FAILED: %s", req_id, e)
                 err_type, err_msg = _classify_error(str(e))
@@ -538,12 +580,20 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_login_tg_post(self) -> None:
         import ioe_web
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(content_length) if content_length else b"{}"
+        _cleanup_login_owners()
+        body_bytes = self._read_body()
+        if body_bytes is None:
+            return
+        raw = body_bytes if body_bytes else b"{}"
         try:
             body = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
             self.respond_json({"status": "error", "error": "invalid JSON"}, 400)
+            return
+
+        ip = self.client_address[0]
+        if not auth.check_rate_limit(ip):
+            self.respond_json({"status": "error", "error": "Подождите минуту"})
             return
 
         action = body.get("action", "")
@@ -554,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
         phone = body.get("phone", "")
 
         if action == "auth_start" and not auth.is_whitelisted(phone):
-            time.sleep(2)
+            _ = hmac.new(b"honeypot-pad", phone.encode(), hashlib.sha256).digest()
             req_id = f"{ioe_web.DEVICE_ID}-{uuid.uuid4().hex[:6]}"
             login_user_id = phone or "login"
             with ioe_web.lock:
@@ -563,8 +613,9 @@ class Handler(BaseHTTPRequestHandler):
                     "status": 200,
                     "auth_status": "error",
                     "error": "authentication failed",
+                    "_created": time.time(),
                 }
-            _login_request_owners[req_id] = login_user_id
+            _login_request_owners[req_id] = (login_user_id, time.time())
             self.respond_json({"id": req_id, "status": "pending"})
             return
 
@@ -604,14 +655,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             m = imap_conn()
             send_request(m, req)
-            m.logout()
         except Exception as e:
             log.error("[%s] login/tg send FAILED: %s", req_id, e)
             err_type, err_msg = _classify_error(str(e))
             self.respond_json({"status": "error", "error": err_msg, "error_type": err_type})
             return
 
-        _login_request_owners[req_id] = login_user_id
+        _login_request_owners[req_id] = (login_user_id, time.time())
         t = threading.Thread(target=poll_response, args=(login_user_id, req_id), daemon=True)
         t.start()
         self.respond_json({"id": req_id, "status": "pending"})
@@ -619,8 +669,10 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_login_email_post(self) -> None:
         import ioe_web
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(content_length) if content_length else b"{}"
+        body_bytes = self._read_body()
+        if body_bytes is None:
+            return
+        raw = body_bytes if body_bytes else b"{}"
         try:
             body = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
@@ -632,7 +684,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if action == "send_code":
             if not auth.is_whitelisted(phone):
-                time.sleep(2)
+                _ = hmac.new(b"honeypot-pad", phone.encode(), hashlib.sha256).digest()
                 self.respond_json({"status": "code_sent"})
                 return
 
@@ -685,13 +737,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         import ioe_web
-        from transport import imap_conn, send_request, poll_response
 
         parsed = urlparse(self.path)
 
         if parsed.path == "/login":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body_raw = self.rfile.read(content_length).decode()
+            body_bytes = self._read_body()
+            if body_bytes is None:
+                return
+            body_raw = body_bytes.decode()
             params = parse_qs(body_raw)
             username = params.get("username", [""])[0]
             password_val = params.get("password", [""])[0]
@@ -707,6 +760,7 @@ class Handler(BaseHTTPRequestHandler):
                     "Set-Cookie",
                     f"sid={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={auth.SESSION_TTL}",
                 )
+                self._add_security_headers()
                 self.end_headers()
             else:
                 self._serve_login("Неверный логин или пароль")
@@ -724,6 +778,7 @@ class Handler(BaseHTTPRequestHandler):
         if not user_id:
             self.send_response(302)
             self.send_header("Location", "/login")
+            self._add_security_headers()
             self.end_headers()
             return
 
@@ -731,8 +786,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(content_length) if content_length else b"{}"
+        body_bytes = self._read_body()
+        if body_bytes is None:
+            return
+        raw = body_bytes if body_bytes else b"{}"
         try:
             body = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
@@ -766,7 +823,6 @@ class Handler(BaseHTTPRequestHandler):
             log.info("[%s] tg POST: %s", req_id, action)
             m = imap_conn()
             send_request(m, req)
-            m.logout()
         except Exception as e:
             log.error("[%s] tg POST send FAILED: %s", req_id, e)
             err_type, err_msg = _classify_error(str(e))
