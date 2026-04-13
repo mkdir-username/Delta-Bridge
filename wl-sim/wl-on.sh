@@ -1,0 +1,61 @@
+#!/bin/bash
+set -euo pipefail
+
+WL_FILE="/opt/wl-sim/whitelist-ips.txt"
+HOST_NET="192.168.0.0/24"
+YA_DNS1="77.88.8.1"
+YA_DNS2="77.88.8.8"
+
+if [[ ! -f "$WL_FILE" ]]; then
+  echo "[WL-SIM] ERROR: $WL_FILE not found. Run resolve-wl.sh first."
+  exit 1
+fi
+
+echo "[WL-SIM] Включение whitelist-режима..."
+echo "[WL-SIM] SSH protection: $HOST_NET"
+
+# Flush
+iptables -F INPUT
+iptables -F OUTPUT
+iptables -F FORWARD
+
+# Default DROP
+iptables -P INPUT DROP
+iptables -P OUTPUT DROP
+iptables -P FORWARD DROP
+
+# Loopback
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+
+# SSH from LAN (lockout protection)
+iptables -A INPUT -s "$HOST_NET" -p tcp --dport 22 -j ACCEPT
+iptables -A OUTPUT -d "$HOST_NET" -p tcp --sport 22 -j ACCEPT
+
+# Established/related
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Yandex DNS only
+for dns in "$YA_DNS1" "$YA_DNS2"; do
+  iptables -A OUTPUT -p udp -d "$dns" --dport 53 -j ACCEPT
+  iptables -A OUTPUT -p tcp -d "$dns" --dport 53 -j ACCEPT
+done
+
+# Whitelist CIDRs
+while IFS= read -r line; do
+  [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+  cidr=$(echo "$line" | awk '{print $1}')
+  iptables -A OUTPUT -d "$cidr" -j ACCEPT
+done < "$WL_FILE"
+
+# Log drops
+iptables -A OUTPUT -j LOG --log-prefix "[WL-DROP] " --log-level 4
+iptables -A INPUT -j LOG --log-prefix "[WL-DROP-IN] " --log-level 4
+
+# Switch DNS to Yandex via systemd-resolved
+resolvectl dns enp0s1 "$YA_DNS1" "$YA_DNS2"
+resolvectl domain enp0s1 "~."
+
+echo "[WL-SIM] Whitelist активен."
+echo "[WL-SIM] Test: ping 8.8.8.8 should timeout, ping 77.88.8.1 should work"
