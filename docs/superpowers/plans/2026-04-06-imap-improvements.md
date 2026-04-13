@@ -714,7 +714,7 @@ if __name__ == "__main__":
 - [ ] **Step 2: Run manually** (requires real credentials)
 
 ```bash
-EMAIL=ioe-relay@yandex.ru IMAP_PASSWORD=... IOE_SECRET=... python scripts/probe_append_rate.py
+EMAIL=your@yandex.ru IMAP_PASSWORD=... IOE_SECRET=... python scripts/probe_append_rate.py
 ```
 
 - [ ] **Step 3: Document results in CLAUDE.md**
