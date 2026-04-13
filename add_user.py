@@ -24,12 +24,20 @@ def main() -> None:
         import pyotp
 
         auth.load_whitelist()
+        if auth.get_user_totp_secret(phone):
+            print(f"TOTP already configured for {phone}")
+            sys.exit(1)
         secret = pyotp.random_base32()
         uri = pyotp.TOTP(secret).provisioning_uri(name=phone, issuer_name="IoE")
-        auth.set_user_totp_secret(phone, secret)
-        print(f"TOTP Secret: {secret}")
+        print(f"Secret: {secret}")
         print(f"URI: {uri}")
-        print("Saved to users.json")
+        print("Add to Authenticator, then enter code to verify:")
+        code = input("Code: ").strip()
+        if not pyotp.TOTP(secret).verify(code, valid_window=1):
+            print("Wrong code. Secret NOT saved.")
+            sys.exit(1)
+        auth.set_user_totp_secret(phone, secret)
+        print("Verified. Saved to users.json")
         sys.exit(0)
 
     if len(sys.argv) < 2:

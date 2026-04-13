@@ -691,7 +691,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             secret = auth.get_user_totp_secret(phone)
             if not secret:
-                self.respond_json({"status": "setup_required"})
+                self.respond_json({"status": "error", "error": "TOTP не настроен. Обратитесь к администратору"})
                 return
             self.respond_json({"status": "code_sent"})
             return
@@ -724,79 +724,8 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"status": "error", "error": "Неверный код"})
             return
 
-        if action == "setup_totp":
-            if not auth.is_whitelisted(phone):
-                self.respond_json({"status": "error", "error": "Не авторизован"})
-                return
-            ip = self.client_address[0]
-            if not auth.check_rate_limit(ip):
-                self.respond_json({"status": "error", "error": "Подождите минуту"})
-                return
-            secret = auth.get_user_totp_secret(phone)
-            if secret:
-                self.respond_json({"status": "error", "error": "TOTP уже настроен"})
-                return
-            new_secret = auth.generate_totp_secret()
-            auth.set_pending_totp(phone, new_secret)
-            uri = auth.get_totp_provisioning_uri(phone, new_secret)
-            qr_data_uri = ""
-            try:
-                import io as _io
-                import base64 as _b64
-                import qrcode
-
-                img = qrcode.make(uri)
-                buf = _io.BytesIO()
-                img.save(buf, format="PNG")
-                qr_data_uri = "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode()
-            except ImportError:
-                pass
-            self.respond_json(
-                {
-                    "status": "setup_required",
-                    "secret": new_secret,
-                    "provisioning_uri": uri,
-                    "qr_data_uri": qr_data_uri,
-                }
-            )
-            return
-
-        if action == "confirm_totp":
-            if not auth.is_whitelisted(phone):
-                self.respond_json({"status": "error", "error": "Не авторизован"})
-                return
-            ip = self.client_address[0]
-            if not auth.check_rate_limit(ip):
-                self.respond_json({"status": "error", "error": "Подождите минуту"})
-                return
-            if auth.get_user_totp_secret(phone):
-                self.respond_json({"status": "error", "error": "TOTP уже настроен"})
-                return
-            pending_secret = auth.get_pending_totp(phone)
-            if not pending_secret:
-                self.respond_json({"status": "error", "error": "Сначала запросите setup"})
-                return
-            code = body.get("code", "")
-            if not code:
-                self.respond_json({"status": "error", "error": "Введите код"})
-                return
-            if auth.verify_totp_with_secret(pending_secret, code):
-                auth.set_user_totp_secret(phone, pending_secret)
-                auth.clear_pending_totp(phone)
-                sid = auth.create_session(phone)
-                result = {"status": "authorized"}
-                body_bytes = json.dumps(result, ensure_ascii=False).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header(
-                    "Set-Cookie",
-                    f"sid={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={auth.SESSION_TTL}",
-                )
-                self._add_security_headers()
-                self.end_headers()
-                self.wfile.write(body_bytes)
-                return
-            self.respond_json({"status": "error", "error": "Неверный код"})
+        if action in ("setup_totp", "confirm_totp"):
+            self.respond_json({"status": "error", "error": "TOTP setup только через CLI"})
             return
 
         self.respond_json({"status": "error", "error": "unknown action"})

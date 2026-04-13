@@ -38,22 +38,13 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Aria
     <div id="phone-error" class="login-error"></div>
   </div>
 
-  <div id="step-setup" class="login-form hidden">
-    <div class="login-hint">\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u0442\u0435 Authenticator</div>
-    <div id="setup-qr"></div>
-    <div id="setup-secret" class="login-hint"></div>
-    <input type="text" id="setup-code" placeholder="\u041a\u043e\u0434 \u0438\u0437 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f" maxlength="6" inputmode="numeric"
-           data-enter="login-setup-verify">
-    <button data-action="login-setup-verify">\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c</button>
-    <div id="setup-error" class="login-error"></div>
-  </div>
 </div>
 
 <script>
 var currentPhone = \'\';
 
 function showStep(name) {{
-  [\'phone\',\'setup\'].forEach(function(s) {{
+  [\'phone\'].forEach(function(s) {{
     var el = document.getElementById(\'step-\'+s);
     if (s===name) el.classList.remove(\'hidden\'); else el.classList.add(\'hidden\');
   }});
@@ -75,10 +66,6 @@ function authCode() {{
       btn.textContent = \'\u0412\u043e\u0439\u0442\u0438\';
       btn.disabled = false;
       if (d.status === \'authorized\') {{ window.location.href = \'/\'; return; }}
-      if (d.error === \'\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043a\u043e\u0434\') {{
-        setupCheck();
-        return;
-      }}
       document.getElementById(\'phone-error\').textContent = d.error || \'\u041e\u0448\u0438\u0431\u043a\u0430\';
     }})
     .catch(function() {{
@@ -88,53 +75,12 @@ function authCode() {{
     }});
 }}
 
-function setupCheck() {{
-  fetch(\'/login/email\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}},
-    body:JSON.stringify({{action:\'setup_totp\', phone:currentPhone}})}})
-    .then(function(r) {{ return r.json(); }})
-    .then(function(d) {{
-      if (d.status === \'setup_required\') {{
-        if (d.qr_data_uri) {{
-          var img = document.createElement(\'img\');
-          img.src = d.qr_data_uri;
-          img.style.width = \'200px\';
-          document.getElementById(\'setup-qr\').textContent = \'\';
-          document.getElementById(\'setup-qr\').appendChild(img);
-        }}
-        if (d.secret) {{
-          document.getElementById(\'setup-secret\').textContent = \'Secret: \' + d.secret;
-        }}
-        showStep(\'setup\');
-      }} else {{
-        document.getElementById(\'phone-error\').textContent = d.error || \'\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043a\u043e\u0434\';
-      }}
-    }});
-}}
-
-function verifySetup() {{
-  var code = document.getElementById(\'setup-code\').value.trim();
-  if (!code) return;
-  var secretEl = document.getElementById(\'setup-secret\');
-  var secret = secretEl.textContent.replace(\'Secret: \', \'\');
-  document.getElementById(\'setup-error\').textContent = \'\';
-  fetch(\'/login/email\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}},
-    body:JSON.stringify({{action:\'confirm_totp\', phone:currentPhone, code:code, secret:secret}})}})
-    .then(function(r) {{ return r.json(); }})
-    .then(function(d) {{
-      if (d.status === \'authorized\') {{ window.location.href = \'/\'; return; }}
-      document.getElementById(\'setup-error\').textContent = d.error || \'\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043a\u043e\u0434\';
-    }})
-    .catch(function() {{
-      document.getElementById(\'setup-error\').textContent = \'\u041d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438\';
-    }});
-}}
 
 document.addEventListener(\'click\', function(e) {{
   var t = e.target.closest(\'[data-action]\');
   if (!t) return;
   var a = t.dataset.action;
   if (a === \'login-auth-code\') authCode();
-  else if (a === \'login-setup-verify\') verifySetup();
 }});
 document.addEventListener(\'keydown\', function(e) {{
   if (e.key !== \'Enter\') return;
@@ -142,7 +88,6 @@ document.addEventListener(\'keydown\', function(e) {{
   if (!t) return;
   var a = t.dataset.enter;
   if (a === \'login-auth-code\') authCode();
-  else if (a === \'login-setup-verify\') verifySetup();
 }});
 </script>
 </body>
