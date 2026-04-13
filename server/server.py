@@ -980,7 +980,7 @@ def process_message(client: Any, uid: int, raw: bytes) -> bool:
             {
                 "id": req_id,
                 "status": 500,
-                "error": type(e).__name__,
+                "error": "internal_error",
                 "user_id": user_id,
             },
         )
