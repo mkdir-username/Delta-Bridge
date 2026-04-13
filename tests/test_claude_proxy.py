@@ -282,6 +282,43 @@ class TestHandleClaudeProxy:
             ioe_server.requests.Session = OrigSession
             ioe_server._claude_session = None
 
+    def test_rejects_arbitrary_host(self):
+        """Claude proxy must only allow api.anthropic.com, not arbitrary hosts."""
+        request = {
+            "http_request": {
+                "method": "GET",
+                "path": "/v1/messages",
+                "headers": {"host": "evil.example.com"},
+            }
+        }
+        result = ioe_server.handle_claude_proxy(request)
+        resp = result["http_response"]
+        assert resp["status_code"] == 403
+
+    def test_allows_anthropic_host(self):
+        """Claude proxy allows api.anthropic.com."""
+        request = {
+            "http_request": {
+                "method": "GET",
+                "path": "/v1/messages",
+                "headers": {"host": "api.anthropic.com"},
+            }
+        }
+        result = ioe_server.handle_claude_proxy(request)
+        assert result["http_response"]["status_code"] == 200
+
+    def test_localhost_rewrites_to_anthropic(self):
+        """localhost host header should be rewritten to api.anthropic.com."""
+        request = {
+            "http_request": {
+                "method": "GET",
+                "path": "/v1/messages",
+                "headers": {"host": "localhost"},
+            }
+        }
+        result = ioe_server.handle_claude_proxy(request)
+        assert result["http_response"]["status_code"] == 200
+
 
 class TestSerialization:
     def test_full_roundtrip(self):

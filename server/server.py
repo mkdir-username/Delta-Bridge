@@ -733,6 +733,7 @@ def handle_http_proxy(request: dict[str, Any]) -> dict[str, Any]:
 
 CLAUDE_PROXY_TIMEOUT = 300
 CLAUDE_DEFAULT_HOST = "api.anthropic.com"
+CLAUDE_ALLOWED_HOSTS = {"api.anthropic.com"}
 
 _claude_session: requests.Session | None = None
 
@@ -754,6 +755,11 @@ def handle_claude_proxy(request: dict[str, Any]) -> dict[str, Any]:
     host = headers.get("host", CLAUDE_DEFAULT_HOST)
     if host in ("localhost", "127.0.0.1") or host.startswith("localhost:"):
         host = CLAUDE_DEFAULT_HOST
+    if host not in CLAUDE_ALLOWED_HOSTS:
+        return {
+            "type": "claude_proxy_response",
+            "http_response": {"status_code": 403, "headers": {}, "body": "forbidden host"},
+        }
     url = f"https://{host}{path}"
 
     req_headers = {k: v for k, v in headers.items() if k.lower() != "host"}
