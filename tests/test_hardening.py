@@ -34,7 +34,7 @@ class TestRewriteLinksScheme:
     def test_https_url_rewritten(self):
         html = '<a href="https://example.com/p">x</a>'
         result = rewrite_links(html)
-        assert "/get?url=https://example.com/p" in result
+        assert "/get?url=https%3A%2F%2Fexample.com%2Fp" in result
 
     def test_relative_url_untouched(self):
         html = '<a href="/local/path">x</a>'

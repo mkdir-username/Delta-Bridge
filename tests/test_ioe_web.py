@@ -131,7 +131,7 @@ class TestV4Design:
 class TestRewriteLinks:
     def test_double_quote_href(self):
         result = transport.rewrite_links('<a href="https://example.com/page">Link</a>')
-        assert "/get?url=https://example.com/page" in result
+        assert "/get?url=https%3A%2F%2Fexample.com%2Fpage" in result
 
     def test_relative_links_untouched(self):
         result = transport.rewrite_links('<a href="/about">About</a>')

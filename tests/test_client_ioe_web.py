@@ -78,12 +78,12 @@ class TestRewriteLinks(unittest.TestCase):
     def test_перезаписывает_href_с_двойными_кавычками(self):
         html = '<a href="https://example.com/page">link</a>'
         result = ioe_web.rewrite_links(html)
-        assert 'href="/get?url=https://example.com/page"' in result
+        assert 'href="/get?url=https%3A%2F%2Fexample.com%2Fpage"' in result
 
     def test_перезаписывает_href_с_одинарными_кавычками(self):
         html = "<a href='https://example.com/page'>link</a>"
         result = ioe_web.rewrite_links(html)
-        assert "href='/get?url=https://example.com/page'" in result
+        assert "href='/get?url=https%3A%2F%2Fexample.com%2Fpage'" in result
 
     def test_не_трогает_относительные_ссылки(self):
         html = '<a href="/local/path">link</a>'
@@ -93,8 +93,8 @@ class TestRewriteLinks(unittest.TestCase):
     def test_обрабатывает_несколько_ссылок(self):
         html = '<a href="https://a.com">1</a><a href="https://b.com">2</a>'
         result = ioe_web.rewrite_links(html)
-        assert "/get?url=https://a.com" in result
-        assert "/get?url=https://b.com" in result
+        assert "/get?url=https%3A%2F%2Fa.com" in result
+        assert "/get?url=https%3A%2F%2Fb.com" in result
 
 
 class TestIMapConn(unittest.TestCase):

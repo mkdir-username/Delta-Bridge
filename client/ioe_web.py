@@ -14,7 +14,7 @@ import threading
 import re
 import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote as _url_quote
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -203,8 +203,16 @@ def poll_response(req_id: str) -> None:
 
 
 def rewrite_links(html: str) -> str:
-    html = re.sub(r'href="(https?://[^"]+)"', lambda m: f'href="/get?url={m.group(1)}"', html)
-    html = re.sub(r"href='(https?://[^']+)'", lambda m: f"href='/get?url={m.group(1)}'", html)
+    html = re.sub(
+        r'href="(https?://[^"]+)"',
+        lambda m: f'href="/get?url={_url_quote(m.group(1), safe="")}"',
+        html,
+    )
+    html = re.sub(
+        r"href='(https?://[^']+)'",
+        lambda m: "href='/get?url=" + _url_quote(m.group(1), safe="") + "'",
+        html,
+    )
     return html
 
 
