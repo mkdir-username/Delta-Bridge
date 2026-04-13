@@ -18,3 +18,7 @@ docs/superpowers/plans/
 *.swo
 .mypy_cache/
 .ruff_cache/
+!.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
