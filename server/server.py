@@ -13,6 +13,7 @@ import base64
 import ipaddress
 import socket
 import fcntl
+from collections import deque
 import email as email_mod
 import email.utils
 from email.mime.multipart import MIMEMultipart
@@ -219,6 +220,7 @@ RATE_LIMIT = 10
 RATE_WINDOW = 60
 _rate_timestamps: dict[str, list[float]] = {}
 _processed_uids: set[int] = set()
+_processed_uids_deque: deque[int] = deque()
 _MAX_PROCESSED = 1000
 
 _sessions: dict[str, dict[str, Any]] = {}
@@ -912,8 +914,11 @@ def process_message(client: Any, uid: int, raw: bytes) -> bool:
             append_response(client, response_dict)
         log.info("Done uid=%s (type=%s)", uid, request.get("type"))
         _processed_uids.add(uid)
+        _processed_uids_deque.append(uid)
         if len(_processed_uids) > _MAX_PROCESSED:
-            _processed_uids.clear()
+            while len(_processed_uids) > _MAX_PROCESSED and _processed_uids_deque:
+                old = _processed_uids_deque.popleft()
+                _processed_uids.discard(old)
         return True
 
     cmd = request.get("cmd", "GET").upper()
@@ -987,8 +992,11 @@ def process_message(client: Any, uid: int, raw: bytes) -> bool:
         log.error("Failed uid=%s: %s: %s", uid, type(e).__name__, e)
 
     _processed_uids.add(uid)
+    _processed_uids_deque.append(uid)
     if len(_processed_uids) > _MAX_PROCESSED:
-        _processed_uids.clear()
+        while len(_processed_uids) > _MAX_PROCESSED and _processed_uids_deque:
+            old = _processed_uids_deque.popleft()
+            _processed_uids.discard(old)
     return True
 
 
