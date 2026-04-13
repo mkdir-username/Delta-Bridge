@@ -143,7 +143,7 @@ function startPoll(id, callback) {
           doneLoading();
         }
       });
-  }, 2000);
+  }, 1000);
 }
 
 function renderResults(query, results) {
