@@ -9,6 +9,7 @@ import time
 import random
 import email as email_mod
 import re
+from urllib.parse import quote as _url_quote
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -337,6 +338,14 @@ _DANGEROUS_HREF_RE = re.compile(
 
 def rewrite_links(html: str) -> str:
     html = _DANGEROUS_HREF_RE.sub('href="#blocked"', html)
-    html = re.sub(r'href="(https?://[^"]+)"', lambda m: f'href="/get?url={m.group(1)}"', html)
-    html = re.sub(r"href='(https?://[^']+)'", lambda m: f"href='/get?url={m.group(1)}'", html)
+    html = re.sub(
+        r'href="(https?://[^"]+)"',
+        lambda m: f'href="/get?url={_url_quote(m.group(1), safe="")}"',
+        html,
+    )
+    html = re.sub(
+        r"href='(https?://[^']+)'",
+        lambda m: "href='/get?url=" + _url_quote(m.group(1), safe="") + "'",
+        html,
+    )
     return html
