@@ -2,9 +2,15 @@
 set -euo pipefail
 
 WL_FILE="/opt/wl-sim/whitelist-ips.txt"
-HOST_NET="192.168.0.0/24"
 YA_DNS1="77.88.8.1"
 YA_DNS2="77.88.8.8"
+
+# Auto-detect gateway subnet for SSH lockout protection
+GW=$(ip route | awk '/default/{print $3}')
+HOST_NET="${GW%.*}.0/24"
+
+# Auto-detect primary network interface
+IFACE=$(ip route | awk '/default/{print $5}')
 
 if [[ ! -f "$WL_FILE" ]]; then
   echo "[WL-SIM] ERROR: $WL_FILE not found. Run resolve-wl.sh first."
@@ -57,8 +63,8 @@ iptables -P OUTPUT DROP
 iptables -P FORWARD DROP
 
 # Switch DNS to Yandex via systemd-resolved
-resolvectl dns enp0s1 "$YA_DNS1" "$YA_DNS2"
-resolvectl domain enp0s1 "~."
+resolvectl dns "$IFACE" "$YA_DNS1" "$YA_DNS2"
+resolvectl domain "$IFACE" "~."
 
 echo "[WL-SIM] Whitelist активен."
 echo "[WL-SIM] Test: ping 8.8.8.8 should timeout, ping 77.88.8.1 should work"
