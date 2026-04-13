@@ -130,50 +130,6 @@ def test_session_auto_renew():
     assert user == "denis"
 
 
-def test_otp_create_and_verify():
-    auth._otp_store.clear()
-    phone = "+79274918222"
-    code = auth.create_otp(phone)
-    assert len(code) == 6
-    assert code.isdigit()
-    assert auth.verify_otp(phone, code) is True
-    assert auth.verify_otp(phone, code) is False
-
-
-def test_otp_expired():
-    auth._otp_store.clear()
-    phone = "+79274918222"
-    code = auth.create_otp(phone)
-    auth._otp_store[phone]["created"] = time.time() - 600
-    assert auth.verify_otp(phone, code) is False
-
-
-def test_otp_wrong_code():
-    auth._otp_store.clear()
-    phone = "+79274918222"
-    auth.create_otp(phone)
-    assert auth.verify_otp(phone, "000000") is False
-
-
-def test_otp_six_digits():
-    auth._otp_store.clear()
-    code = auth.create_otp("+79274918222")
-    assert len(code) == 6
-    assert code.isdigit()
-
-
-def test_otp_ip_binding():
-    auth._otp_store.clear()
-    code = auth.create_otp("+79274918222", ip="1.2.3.4")
-    assert auth.verify_otp("+79274918222", code, ip="1.2.3.4") is True
-
-
-def test_otp_wrong_ip_rejected():
-    auth._otp_store.clear()
-    code = auth.create_otp("+79274918222", ip="1.2.3.4")
-    assert auth.verify_otp("+79274918222", code, ip="5.6.7.8") is False
-
-
 def test_otp_phone_rate_limit():
     auth._otp_phone_rate.clear()
     for _ in range(3):
@@ -194,12 +150,6 @@ def test_otp_phone_rate_limit_window():
         time.time() - 400,
     ]
     assert auth.check_otp_rate_limit(phone) is True
-
-
-def test_otp_no_ip_still_works():
-    auth._otp_store.clear()
-    code = auth.create_otp("+79274918222")
-    assert auth.verify_otp("+79274918222", code) is True
 
 
 def test_get_user_email():
@@ -286,19 +236,62 @@ def test_whitelist_no_sig_no_secret_ok(tmp_path):
     assert auth.is_whitelisted("+79274918222")
 
 
-def test_send_otp_email():
-    from unittest.mock import patch, MagicMock
+def test_generate_totp_secret():
+    secret = auth.generate_totp_secret()
+    assert len(secret) == 32
 
-    with patch("auth.smtplib.SMTP_SSL") as mock_smtp:
-        mock_server = MagicMock()
-        mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_server)
-        mock_smtp.return_value.__exit__ = MagicMock(return_value=False)
 
-        auth.send_otp_email("test@gmail.com", "42567", "user@yandex.ru", "pass123")
+def test_verify_totp_valid(tmp_path):
+    import pyotp
 
-        mock_smtp.assert_called_once_with("smtp.yandex.ru", 465)
-        mock_server.login.assert_called_once_with("user@yandex.ru", "pass123")
-        mock_server.send_message.assert_called_once()
-        msg = mock_server.send_message.call_args[0][0]
-        assert "42567" in msg.get_payload(decode=True).decode()
-        assert msg["To"] == "test@gmail.com"
+    secret = pyotp.random_base32()
+    wl = {"+79274918222": {"totp_secret": secret}}
+    p = tmp_path / "users.json"
+    p.write_text(json.dumps(wl))
+    auth.load_whitelist(str(p))
+    code = pyotp.TOTP(secret).now()
+    assert auth.verify_totp("+79274918222", code) is True
+
+
+def test_verify_totp_wrong_code(tmp_path):
+    import pyotp
+
+    secret = pyotp.random_base32()
+    wl = {"+79274918222": {"totp_secret": secret}}
+    p = tmp_path / "users.json"
+    p.write_text(json.dumps(wl))
+    auth.load_whitelist(str(p))
+    assert auth.verify_totp("+79274918222", "000000") is False
+
+
+def test_verify_totp_no_secret(tmp_path):
+    wl = {"+79006433340": {}}
+    p = tmp_path / "users.json"
+    p.write_text(json.dumps(wl))
+    auth.load_whitelist(str(p))
+    assert auth.verify_totp("+79006433340", "123456") is False
+
+
+def test_provisioning_uri():
+    secret = "JBSWY3DPEHPK3PXP"
+    uri = auth.get_totp_provisioning_uri("+79274918222", secret)
+    assert uri.startswith("otpauth://totp/")
+    assert "IoE" in uri
+
+
+def test_verify_totp_with_secret_window():
+    import pyotp
+
+    secret = pyotp.random_base32()
+    totp = pyotp.TOTP(secret)
+    code = totp.at(time.time() - 30)
+    assert auth.verify_totp_with_secret(secret, code) is True
+
+
+def test_set_user_totp_secret(tmp_path):
+    wl = {"+79274918222": {}}
+    p = tmp_path / "users.json"
+    p.write_text(json.dumps(wl))
+    auth.load_whitelist(str(p))
+    auth.set_user_totp_secret("+79274918222", "TESTSECRET")
+    assert auth.get_user_totp_secret("+79274918222") == "TESTSECRET"
