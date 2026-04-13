@@ -7,14 +7,11 @@ PORT="${1:-8080}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE=""
 
-# Check for updates (info only, no auto-reset)
+# Auto-pull (silent, 10s timeout — fails gracefully under WL)
 if [ -d "$DIR/.git" ]; then
   cd "$DIR"
-  if git fetch origin main --quiet 2>/dev/null; then
-    BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
-    if [ "$BEHIND" -gt 0 ] 2>/dev/null; then
-      echo "Updates available ($BEHIND commits). Run: git pull origin main"
-    fi
+  if timeout 10 git pull --ff-only origin main 2>/dev/null; then
+    echo "[ioe] updated to $(git log --oneline -1 2>/dev/null)"
   fi
 fi
 
