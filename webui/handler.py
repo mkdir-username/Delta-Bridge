@@ -207,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/login/status":
             ip = self.client_address[0]
-            if not auth.check_rate_limit(ip):
+            if not auth.check_status_rate_limit(ip):
                 self.respond_json({"status": "error", "error": "rate limited"}, 429)
                 return
             ioe_web._cleanup_pending()

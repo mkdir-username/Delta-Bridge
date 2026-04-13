@@ -21,6 +21,8 @@ SESSION_TTL = 2592000
 SESSION_IDLE_TTL = 86400
 RATE_LIMIT = 5
 RATE_WINDOW = 60
+STATUS_RATE_LIMIT = 30
+STATUS_RATE_WINDOW = 60
 _CLEANUP_INTERVAL = 60
 
 _whitelist: Whitelist = {}
@@ -28,6 +30,7 @@ _whitelist_path: str = ""
 _sessions: SessionStore = {}
 _sessions_path: str = ""
 _rate: RateStore = {}
+_status_rate: RateStore = {}
 _last_cleanup: float = 0
 
 
@@ -193,6 +196,18 @@ def check_rate_limit(ip: str) -> bool:
         return False
     timestamps.append(now)
     _rate[ip] = timestamps
+    return True
+
+
+def check_status_rate_limit(ip: str) -> bool:
+    now = time.time()
+    timestamps = _status_rate.get(ip, [])
+    timestamps = [t for t in timestamps if now - t < STATUS_RATE_WINDOW]
+    if len(timestamps) >= STATUS_RATE_LIMIT:
+        _status_rate[ip] = timestamps
+        return False
+    timestamps.append(now)
+    _status_rate[ip] = timestamps
     return True
 
 
