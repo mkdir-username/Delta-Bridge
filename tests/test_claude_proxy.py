@@ -22,7 +22,9 @@ for _mod in [
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
 sys.modules["truststore"].inject_into_ssl = lambda: None
-sys.modules["imapclient"].IMAPClient = type("IMAPClient", (), {})
+sys.modules["imapclient"].IMAPClient = type(
+    "IMAPClient", (), {"__init__": lambda self, *a, **kw: None, "login": lambda self, *a, **kw: None}
+)
 
 
 class _MockDoc:
@@ -344,7 +346,7 @@ class TestExtractAttachment:
 class TestImapConnect:
     def test_подключение_и_логин(self):
         mock_imap = MagicMock()
-        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+        with patch.object(claude_proxy, "IMAPClient", return_value=mock_imap):
             conn = claude_proxy._imap_connect()
         mock_imap.login.assert_called_once()
         assert conn is mock_imap
@@ -415,12 +417,11 @@ class TestPollResponse:
         raw = msg.as_bytes()
 
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1"])
-        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
-        mock_imap.store.return_value = ("OK", [])
-        mock_imap.expunge.return_value = ("OK", [])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.search.return_value = [1]
+        mock_imap.fetch.return_value = {1: {b"RFC822": raw}}
+        mock_imap.set_flags.return_value = {}
+        mock_imap.expunge.return_value = []
 
         with (
             patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
@@ -433,14 +434,20 @@ class TestPollResponse:
 
     def test_таймаут_без_ответа(self):
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b""])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.search.return_value = []
+        mock_imap.idle.return_value = None
+        mock_imap.idle_check.return_value = []
+        mock_imap.idle_done.return_value = None
+
+        import itertools
+
+        fake_time = itertools.count(0, 50).__next__
 
         with (
             patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
-            patch.object(claude_proxy, "POLL_CYCLES", 3),
-            patch("time.sleep"),
+            patch.object(claude_proxy, "POLL_TIMEOUT", 2),
+            patch("time.time", side_effect=fake_time),
         ):
             result = claude_proxy._poll_response("no-such-id")
 
@@ -628,16 +635,20 @@ class TestPollResponseBranches:
         raw = self._make_encrypted_msg(response_dict)
 
         first_imap = MagicMock()
-        first_imap.select.return_value = ("OK", [])
+        first_imap.select_folder.return_value = {}
+        first_imap.search.return_value = []
+        first_imap.idle.side_effect = Exception("idle failed")
         first_imap.noop.side_effect = Exception("noop failed")
 
         second_imap = MagicMock()
-        second_imap.select.return_value = ("OK", [])
-        second_imap.noop.return_value = ("OK", [])
-        second_imap.search.return_value = ("OK", [b"1"])
-        second_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
-        second_imap.store.return_value = ("OK", [])
-        second_imap.expunge.return_value = ("OK", [])
+        second_imap.select_folder.return_value = {}
+        second_imap.idle.return_value = None
+        second_imap.idle_check.return_value = []
+        second_imap.idle_done.return_value = None
+        second_imap.search.return_value = [1]
+        second_imap.fetch.return_value = {1: {b"RFC822": raw}}
+        second_imap.set_flags.return_value = {}
+        second_imap.expunge.return_value = []
 
         connect_calls = {"n": 0}
 
@@ -647,10 +658,17 @@ class TestPollResponseBranches:
                 return first_imap
             return second_imap
 
+        call_count = {"n": 0}
+
+        def fake_time():
+            call_count["n"] += 1
+            return 0 if call_count["n"] < 20 else 9999
+
         with (
             patch.object(claude_proxy, "_imap_connect", side_effect=make_imap),
             patch.object(claude_proxy, "IOE_KEY", key),
-            patch("time.sleep"),
+            patch.object(claude_proxy, "POLL_TIMEOUT", 120),
+            patch("time.time", side_effect=fake_time),
         ):
             result = claude_proxy._poll_response(req_id)
 
@@ -658,62 +676,31 @@ class TestPollResponseBranches:
         assert result["id"] == req_id
         assert connect_calls["n"] == 2
 
-    def test_unseen_пусто_после_5_циклов_ищет_all(self):
-        key = derive_key("test-secret-key")
-        req_id = "req-fallback"
-        response_dict = {
-            "id": req_id,
-            "type": "claude_proxy_response",
-            "http_response": {"status_code": 200, "headers": {}, "body": "ok"},
-        }
-        raw = self._make_encrypted_msg(response_dict)
-
-        search_calls = {"n": 0}
-
-        def fake_search(charset, *criteria):
-            search_calls["n"] += 1
-            if "UNSEEN" in criteria:
-                return ("OK", [b""])
-            return ("OK", [b"1"])
-
-        mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.side_effect = fake_search
-        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
-        mock_imap.store.return_value = ("OK", [])
-        mock_imap.expunge.return_value = ("OK", [])
-
-        with (
-            patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
-            patch.object(claude_proxy, "IOE_KEY", key),
-            patch("time.sleep"),
-        ):
-            result = claude_proxy._poll_response(req_id)
-
-        assert result is not None
-        assert result["id"] == req_id
-        all_calls = [c for c in mock_imap.search.call_args_list if "ALL" in c[0]]
-        assert len(all_calls) >= 1
-
     def test_fetch_data_none_пропускает(self):
+        import itertools
+
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1"])
-        mock_imap.fetch.return_value = ("OK", [None])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.idle.return_value = None
+        mock_imap.idle_check.return_value = []
+        mock_imap.idle_done.return_value = None
+        mock_imap.search.return_value = [1]
+        mock_imap.fetch.return_value = {1: {}}
+
+        fake_time = itertools.count(0, 50).__next__
 
         with (
             patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
-            patch.object(claude_proxy, "POLL_CYCLES", 2),
-            patch("time.sleep"),
+            patch.object(claude_proxy, "POLL_TIMEOUT", 2),
+            patch("time.time", side_effect=fake_time),
         ):
             result = claude_proxy._poll_response("req-none-data")
 
         assert result is None
 
     def test_decrypt_ошибка_продолжает_цикл(self):
-        fake_raw = b"From: x\r\n\r\nbody-without-attachment"
+        import itertools
+
         msg = MIMEMultipart()
         part = MIMEBase("application", "pdf")
         part.set_payload(b"not-valid-encrypted")
@@ -723,15 +710,19 @@ class TestPollResponseBranches:
         raw = msg.as_bytes()
 
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1"])
-        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.idle.return_value = None
+        mock_imap.idle_check.return_value = []
+        mock_imap.idle_done.return_value = None
+        mock_imap.search.return_value = [1]
+        mock_imap.fetch.return_value = {1: {b"RFC822": raw}}
+
+        fake_time = itertools.count(0, 50).__next__
 
         with (
             patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
-            patch.object(claude_proxy, "POLL_CYCLES", 2),
-            patch("time.sleep"),
+            patch.object(claude_proxy, "POLL_TIMEOUT", 2),
+            patch("time.time", side_effect=fake_time),
         ):
             result = claude_proxy._poll_response("req-bad-decrypt")
 
@@ -748,17 +739,19 @@ class TestPollResponseBranches:
         raw = self._make_encrypted_msg(response_dict)
 
         mock_imap = MagicMock()
-        mock_imap.select.return_value = ("OK", [])
-        mock_imap.noop.return_value = ("OK", [])
-        mock_imap.search.return_value = ("OK", [b"1"])
-        mock_imap.fetch.return_value = ("OK", [(b"1 (RFC822 {100})", raw)])
-        mock_imap.store.side_effect = Exception("store failed")
-        mock_imap.expunge.return_value = ("OK", [])
+        mock_imap.select_folder.return_value = {}
+        mock_imap.idle.return_value = None
+        mock_imap.idle_check.return_value = []
+        mock_imap.idle_done.return_value = None
+        mock_imap.search.return_value = [1]
+        mock_imap.fetch.return_value = {1: {b"RFC822": raw}}
+        mock_imap.set_flags.side_effect = Exception("set_flags failed")
+        mock_imap.expunge.return_value = []
 
         with (
             patch.object(claude_proxy, "_imap_connect", return_value=mock_imap),
             patch.object(claude_proxy, "IOE_KEY", key),
-            patch("time.sleep"),
+            patch.object(claude_proxy, "POLL_TIMEOUT", 120),
         ):
             result = claude_proxy._poll_response(req_id)
 
