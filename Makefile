@@ -16,4 +16,7 @@ typecheck:
 test:
 	python -m pytest
 
-check: lint typecheck test
+coverage:
+	python -m pytest --cov=server --cov=client --cov=webui --cov=ioe_types --cov=ioe_crypto --cov=ioe_telemetry --cov-report=term-missing --cov-fail-under=90
+
+check: lint typecheck coverage
