@@ -1238,6 +1238,30 @@ class TestLoginFlow:
         server.server_close()
         auth.get_authenticated_user = old_auth
 
+    def test_login_status_rate_limited(self):
+        import ioe_web
+        import auth
+
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+
+        for i in range(auth.RATE_LIMIT):
+            t = threading.Thread(target=server.handle_request, daemon=True)
+            t.start()
+            resp = urlopen(f"http://127.0.0.1:{port}/login/status?id=test{i}", timeout=5)
+            assert resp.status == 200
+
+        from urllib.error import HTTPError as UrlHTTPError
+
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        try:
+            urlopen(f"http://127.0.0.1:{port}/login/status?id=over", timeout=5)
+            raise AssertionError("ожидался 429")
+        except UrlHTTPError as e:
+            assert e.code == 429
+        server.server_close()
+
     def test_login_post_rate_limited(self):
         import ioe_web
 
