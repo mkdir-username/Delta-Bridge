@@ -597,18 +597,6 @@ class TestKitEndpoint:
 
 
 class TestLoginCheckPhone:
-    def test_check_phone_returns_allowed(self):
-        import ioe_web
-
-        port = get_free_port()
-        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
-        t = threading.Thread(target=server.handle_request, daemon=True)
-        t.start()
-        resp = urlopen(f"http://127.0.0.1:{port}/login/check_phone", timeout=5)
-        data = json.loads(resp.read().decode())
-        assert data["allowed"] is True
-        server.server_close()
-
     def test_login_tg_get_returns_405(self):
         import ioe_web
         from urllib.error import HTTPError as UrlHTTPError

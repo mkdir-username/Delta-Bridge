@@ -202,9 +202,6 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/login":
             self._serve_login()
             return
-        if parsed.path == "/login/check_phone":
-            self.respond_json({"allowed": True})
-            return
         if parsed.path.startswith("/login/tg"):
             self.respond_json({"status": "error", "error": "use POST"}, 405)
             return
