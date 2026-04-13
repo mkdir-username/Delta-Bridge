@@ -244,6 +244,7 @@ class TestLoginEmailPost:
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
         with (
+            patch.object(auth, "check_rate_limit", return_value=True),
             patch.object(auth, "verify_totp", return_value=True),
             patch.object(auth, "create_session", return_value="abc123"),
         ):
@@ -265,7 +266,10 @@ class TestLoginEmailPost:
     def test_email_verify_code_wrong(self):
         """Неверный код → error."""
         port = get_free_port()
-        with patch.object(auth, "verify_totp", return_value=False):
+        with (
+            patch.object(auth, "check_rate_limit", return_value=True),
+            patch.object(auth, "verify_totp", return_value=False),
+        ):
             status, body = post_json(
                 port, "/login/email", {"action": "verify_code", "phone": "+79001234567", "code": "000000"}
             )
@@ -283,3 +287,96 @@ class TestLoginEmailPost:
         port = get_free_port()
         status, body = post_json(port, "/login/email", {"action": "unknown"})
         assert body["status"] == "error"
+
+    def test_confirm_totp_rejects_non_whitelisted(self):
+        """confirm_totp отклоняет номер не из whitelist."""
+        port = get_free_port()
+        with patch.object(auth, "is_whitelisted", return_value=False):
+            status, body = post_json(
+                port,
+                "/login/email",
+                {"action": "confirm_totp", "phone": "+70000000000", "secret": "JBSWY3DPEHPK3PXP", "code": "123456"},
+            )
+        assert body["status"] == "error"
+
+    def test_confirm_totp_rejects_when_secret_exists(self):
+        """confirm_totp нельзя перезаписать существующий TOTP secret."""
+        port = get_free_port()
+        with (
+            patch.object(auth, "is_whitelisted", return_value=True),
+            patch.object(auth, "check_rate_limit", return_value=True),
+            patch.object(auth, "get_user_totp_secret", return_value="EXISTING_SECRET"),
+        ):
+            status, body = post_json(
+                port,
+                "/login/email",
+                {"action": "confirm_totp", "phone": "+79001234567", "secret": "NEW_SECRET", "code": "123456"},
+            )
+        assert body["status"] == "error"
+        assert "уже настроен" in body["error"]
+
+    def test_confirm_totp_rejects_arbitrary_client_secret(self):
+        """confirm_totp без server-side pending secret — отклоняет."""
+        port = get_free_port()
+        with (
+            patch.object(auth, "is_whitelisted", return_value=True),
+            patch.object(auth, "check_rate_limit", return_value=True),
+            patch.object(auth, "get_user_totp_secret", return_value=None),
+            patch.object(auth, "get_pending_totp", return_value=None),
+        ):
+            status, body = post_json(
+                port,
+                "/login/email",
+                {"action": "confirm_totp", "phone": "+79001234567", "secret": "ATTACKER_SECRET", "code": "123456"},
+            )
+        assert body["status"] == "error"
+
+    def test_confirm_totp_uses_pending_secret(self):
+        """confirm_totp использует server-side pending secret, а не secret из body."""
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        pending = "SERVER_SIDE_SECRET"
+        with (
+            patch.object(auth, "is_whitelisted", return_value=True),
+            patch.object(auth, "check_rate_limit", return_value=True),
+            patch.object(auth, "get_user_totp_secret", return_value=None),
+            patch.object(auth, "get_pending_totp", return_value=pending),
+            patch.object(auth, "verify_totp_with_secret", return_value=True) as mock_verify,
+            patch.object(auth, "set_user_totp_secret") as mock_set,
+            patch.object(auth, "clear_pending_totp") as mock_clear,
+            patch.object(auth, "create_session", return_value="sess123"),
+        ):
+            data = json.dumps(
+                {"action": "confirm_totp", "phone": "+79001234567", "secret": "IGNORED_CLIENT_SECRET", "code": "123456"}
+            ).encode()
+            req = Request(
+                f"http://127.0.0.1:{port}/login/email",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            resp = urlopen(req, timeout=5)
+            body = json.loads(resp.read().decode())
+        t.join(timeout=3)
+        server.server_close()
+        assert body["status"] == "authorized"
+        mock_verify.assert_called_once_with(pending, "123456")
+        mock_set.assert_called_once_with("+79001234567", pending)
+        mock_clear.assert_called_once()
+
+    def test_verify_code_rate_limited(self):
+        """verify_code блокируется при rate limit."""
+        port = get_free_port()
+        with (
+            patch.object(auth, "check_rate_limit", return_value=False),
+            patch.object(auth, "is_whitelisted", return_value=True),
+        ):
+            status, body = post_json(
+                port,
+                "/login/email",
+                {"action": "verify_code", "phone": "+79001234567", "code": "000000"},
+            )
+        assert body["status"] == "error"
+        assert "одожд" in body["error"].lower() or "минут" in body["error"].lower()

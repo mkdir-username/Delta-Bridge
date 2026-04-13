@@ -250,6 +250,30 @@ def mask_email(email: str | None) -> str | None:
     return f"{masked}@{domain}"
 
 
+_pending_totp: dict[str, dict[str, float | str]] = {}
+PENDING_TOTP_TTL = 300
+
+
+def set_pending_totp(phone: str, secret: str) -> None:
+    phone = _normalize_phone(phone)
+    _pending_totp[phone] = {"secret": secret, "ts": time.time()}
+
+
+def get_pending_totp(phone: str) -> str | None:
+    phone = _normalize_phone(phone)
+    entry = _pending_totp.get(phone)
+    if not entry:
+        return None
+    if time.time() - float(entry["ts"]) > PENDING_TOTP_TTL:
+        _pending_totp.pop(phone, None)
+        return None
+    return str(entry["secret"])
+
+
+def clear_pending_totp(phone: str) -> None:
+    _pending_totp.pop(_normalize_phone(phone), None)
+
+
 def generate_totp_secret() -> str:
     return pyotp.random_base32()
 
