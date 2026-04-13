@@ -14,15 +14,13 @@ fi
 echo "[WL-SIM] Включение whitelist-режима..."
 echo "[WL-SIM] SSH protection: $HOST_NET"
 
-# Flush
+# Flush (policy stays ACCEPT until rules are in place)
+iptables -P INPUT ACCEPT
+iptables -P OUTPUT ACCEPT
+iptables -P FORWARD ACCEPT
 iptables -F INPUT
 iptables -F OUTPUT
 iptables -F FORWARD
-
-# Default DROP
-iptables -P INPUT DROP
-iptables -P OUTPUT DROP
-iptables -P FORWARD DROP
 
 # Loopback
 iptables -A INPUT -i lo -j ACCEPT
@@ -52,6 +50,11 @@ done < "$WL_FILE"
 # Log drops
 iptables -A OUTPUT -j LOG --log-prefix "[WL-DROP] " --log-level 4
 iptables -A INPUT -j LOG --log-prefix "[WL-DROP-IN] " --log-level 4
+
+# NOW set DROP policy (all ACCEPT rules are in place)
+iptables -P INPUT DROP
+iptables -P OUTPUT DROP
+iptables -P FORWARD DROP
 
 # Switch DNS to Yandex via systemd-resolved
 resolvectl dns enp0s1 "$YA_DNS1" "$YA_DNS2"
