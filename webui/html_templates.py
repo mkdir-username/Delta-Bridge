@@ -29,19 +29,23 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Aria
   <div class="login-subtitle">internet over email</div>
 
   <div id="step-phone" class="login-form">
-    <div class="login-hint">\u041a\u043e\u0434 \u043f\u0440\u0438\u0434\u0451\u0442 \u043d\u0430 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u043d\u044b\u0439 email</div>
+    <div class="login-hint">\u041d\u043e\u043c\u0435\u0440 \u0438 \u043a\u043e\u0434 \u0438\u0437 Authenticator</div>
     <input type="tel" id="phone" placeholder="+7XXXXXXXXXX" value="+7"
-           data-enter="login-auth-start">
-    <button data-action="login-auth-start">\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434</button>
-    <div id="phone-error" class="login-error"></div>
-  </div>
-
-  <div id="step-code" class="login-form hidden">
-    <div class="login-hint" id="code-hint">\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043a\u043e\u0434 \u0438\u0437 email</div>
+           data-enter="login-auth-code">
     <input type="text" id="code" placeholder="123456" maxlength="6" inputmode="numeric"
            data-enter="login-auth-code">
     <button data-action="login-auth-code">\u0412\u043e\u0439\u0442\u0438</button>
-    <div id="code-error" class="login-error"></div>
+    <div id="phone-error" class="login-error"></div>
+  </div>
+
+  <div id="step-setup" class="login-form hidden">
+    <div class="login-hint">\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u0442\u0435 Authenticator</div>
+    <div id="setup-qr"></div>
+    <div id="setup-secret" class="login-hint"></div>
+    <input type="text" id="setup-code" placeholder="\u041a\u043e\u0434 \u0438\u0437 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f" maxlength="6" inputmode="numeric"
+           data-enter="login-setup-verify">
+    <button data-action="login-setup-verify">\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c</button>
+    <div id="setup-error" class="login-error"></div>
   </div>
 </div>
 
@@ -49,62 +53,79 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Helvetica,Aria
 var currentPhone = \'\';
 
 function showStep(name) {{
-  [\'phone\',\'code\'].forEach(function(s) {{
+  [\'phone\',\'setup\'].forEach(function(s) {{
     var el = document.getElementById(\'step-\'+s);
     if (s===name) el.classList.remove(\'hidden\'); else el.classList.add(\'hidden\');
   }});
 }}
 
-function authStart() {{
+function authCode() {{
   var phone = document.getElementById(\'phone\').value.trim();
-  if (!phone) return;
-  document.getElementById(\'phone-error\').textContent = \'\';
+  var code = document.getElementById(\'code\').value.trim();
+  if (!phone || !code) return;
   currentPhone = phone;
+  document.getElementById(\'phone-error\').textContent = \'\';
   var btn = document.querySelector(\'#step-phone button\');
-  btn.textContent = \'\u041e\u0442\u043f\u0440\u0430\u0432\u043a\u0430...\';
+  btn.textContent = \'\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430...\';
   btn.disabled = true;
-  fetch(\'/login/email\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}}, body:JSON.stringify({{action:\'send_code\', phone:phone}})}})
+  fetch(\'/login/email\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}},
+    body:JSON.stringify({{action:\'verify_code\', phone:phone, code:code}})}})
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
-      btn.textContent = \'\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434\';
+      btn.textContent = \'\u0412\u043e\u0439\u0442\u0438\';
       btn.disabled = false;
-      if (d.status === \'error\') {{
-        document.getElementById(\'phone-error\').textContent = d.error;
+      if (d.status === \'authorized\') {{ window.location.href = \'/\'; return; }}
+      if (d.error === \'\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043a\u043e\u0434\') {{
+        setupCheck();
         return;
       }}
-      if (d.email) document.getElementById(\'code-hint\').textContent = \'\u041a\u043e\u0434 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d \u043d\u0430 \' + d.email;
-      showStep(\'code\');
-      document.getElementById(\'code\').focus();
+      document.getElementById(\'phone-error\').textContent = d.error || \'\u041e\u0448\u0438\u0431\u043a\u0430\';
     }})
     .catch(function() {{
-      btn.textContent = \'\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434\';
+      btn.textContent = \'\u0412\u043e\u0439\u0442\u0438\';
       btn.disabled = false;
-      document.getElementById(\'phone-error\').textContent = \'\u041d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438 \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043e\u043c\';
+      document.getElementById(\'phone-error\').textContent = \'\u041d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438\';
     }});
 }}
 
-function authCode() {{
-  var code = document.getElementById(\'code\').value.trim();
-  if (!code) return;
-  document.getElementById(\'code-error\').textContent = \'\';
-  var btn = document.querySelector(\'#step-code button\');
-  btn.textContent = \'\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430...\';
-  btn.disabled = true;
-  fetch(\'/login/email\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}}, body:JSON.stringify({{action:\'verify_code\', phone:currentPhone, code:code}})}})
+function setupCheck() {{
+  fetch(\'/login/email\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}},
+    body:JSON.stringify({{action:\'setup_totp\', phone:currentPhone}})}})
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
-      btn.textContent = \'\u0412\u043e\u0439\u0442\u0438\';
-      btn.disabled = false;
-      if (d.status === \'authorized\') {{
-        window.location.href = \'/\';
-        return;
+      if (d.status === \'setup_required\') {{
+        if (d.qr_data_uri) {{
+          var img = document.createElement(\'img\');
+          img.src = d.qr_data_uri;
+          img.style.width = \'200px\';
+          document.getElementById(\'setup-qr\').textContent = \'\';
+          document.getElementById(\'setup-qr\').appendChild(img);
+        }}
+        if (d.secret) {{
+          document.getElementById(\'setup-secret\').textContent = \'Secret: \' + d.secret;
+        }}
+        showStep(\'setup\');
+      }} else {{
+        document.getElementById(\'phone-error\').textContent = d.error || \'\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043a\u043e\u0434\';
       }}
-      document.getElementById(\'code-error\').textContent = d.error || \'\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043a\u043e\u0434\';
+    }});
+}}
+
+function verifySetup() {{
+  var code = document.getElementById(\'setup-code\').value.trim();
+  if (!code) return;
+  var secretEl = document.getElementById(\'setup-secret\');
+  var secret = secretEl.textContent.replace(\'Secret: \', \'\');
+  document.getElementById(\'setup-error\').textContent = \'\';
+  fetch(\'/login/email\', {{method:\'POST\', headers:{{\'Content-Type\':\'application/json\'}},
+    body:JSON.stringify({{action:\'confirm_totp\', phone:currentPhone, code:code, secret:secret}})}})
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (d.status === \'authorized\') {{ window.location.href = \'/\'; return; }}
+      document.getElementById(\'setup-error\').textContent = d.error || \'\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043a\u043e\u0434\';
     }})
     .catch(function() {{
-      btn.textContent = \'\u0412\u043e\u0439\u0442\u0438\';
-      btn.disabled = false;
-      document.getElementById(\'code-error\').textContent = \'\u041d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438 \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043e\u043c\';
+      document.getElementById(\'setup-error\').textContent = \'\u041d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438\';
     }});
 }}
 
@@ -112,16 +133,16 @@ document.addEventListener(\'click\', function(e) {{
   var t = e.target.closest(\'[data-action]\');
   if (!t) return;
   var a = t.dataset.action;
-  if (a === \'login-auth-start\') authStart();
-  else if (a === \'login-auth-code\') authCode();
+  if (a === \'login-auth-code\') authCode();
+  else if (a === \'login-setup-verify\') verifySetup();
 }});
 document.addEventListener(\'keydown\', function(e) {{
   if (e.key !== \'Enter\') return;
   var t = e.target.closest(\'[data-enter]\');
   if (!t) return;
   var a = t.dataset.enter;
-  if (a === \'login-auth-start\') authStart();
-  else if (a === \'login-auth-code\') authCode();
+  if (a === \'login-auth-code\') authCode();
+  else if (a === \'login-setup-verify\') verifySetup();
 }});
 </script>
 </body>
