@@ -592,8 +592,9 @@ def do_browser_search(query: str) -> list[dict[str, str]]:
             "actions": [
                 {"action": "goto"},
                 {"action": "extract", "selector": ".result__a"},
+                {"action": "extract", "selector": ".result__snippet"},
             ],
-            "timeout": 15000,
+            "timeout": 30000,
         }
         resp = handle_browser_request(browser_req)
         if resp.get("status") != 200:
@@ -604,20 +605,24 @@ def do_browser_search(query: str) -> list[dict[str, str]]:
                     "snippet": resp.get("error", "unknown"),
                 }
             ]
+        links = []
+        snippets = []
         for r in resp.get("results", []):
-            if r.get("action") == "extract" and r.get("selector") == ".result__a":
-                elements = r.get("elements", [])
-                results = [
-                    {
-                        "title": el.get("text", "").strip(),
-                        "href": el.get("href", ""),
-                        "snippet": "",
-                    }
-                    for el in elements[:10]
-                    if el.get("text", "").strip()
-                ]
-                if results:
-                    return results
+            if r.get("action") == "extract":
+                sel = r.get("selector", "")
+                if sel == ".result__a":
+                    links = r.get("elements", [])
+                elif sel == ".result__snippet":
+                    snippets = r.get("elements", [])
+        results = []
+        for i, el in enumerate(links[:10]):
+            text = el.get("text", "").strip()
+            if not text:
+                continue
+            snip = snippets[i].get("text", "").strip() if i < len(snippets) else ""
+            results.append({"title": text, "href": el.get("href", ""), "snippet": snip})
+        if results:
+            return results
         return [
             {
                 "title": "No results",
