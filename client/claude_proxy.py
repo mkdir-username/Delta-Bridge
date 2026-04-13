@@ -8,7 +8,6 @@ import time
 import uuid
 import random
 import logging
-import imaplib
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from email.mime.multipart import MIMEMultipart
@@ -20,6 +19,7 @@ import email as email_mod
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from ioe_crypto import derive_key, compress_encrypt, decrypt_decompress
+from imapclient import IMAPClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +36,7 @@ IOE_KEY: bytes = derive_key(IOE_SECRET) if IOE_SECRET else b""
 IMAP_HOST: str = "imap.yandex.ru"
 QUEUE_FOLDER: str = "IoE"
 PROXY_PORT: int = int(os.environ.get("IOE_CLAUDE_PORT", "8090"))
-POLL_CYCLES: int = 300
+POLL_TIMEOUT: int = 120
 
 SUBJECTS: list[str] = [
     "Re: Протокол совещания",
@@ -75,16 +75,16 @@ BODIES: list[str] = [
 
 
 _send_lock: threading.Lock = threading.Lock()
-_send_conn: imaplib.IMAP4_SSL | None = None
+_send_conn: IMAPClient | None = None
 
 
-def _imap_connect() -> imaplib.IMAP4_SSL:
-    m = imaplib.IMAP4_SSL(IMAP_HOST, 993)
+def _imap_connect() -> IMAPClient:
+    m = IMAPClient(IMAP_HOST, ssl=True)
     m.login(EMAIL, IMAP_PASSWORD)
     return m
 
 
-def _get_send_conn() -> imaplib.IMAP4_SSL:
+def _get_send_conn() -> IMAPClient:
     global _send_conn
     if _send_conn is not None:
         try:
@@ -113,7 +113,7 @@ def _send_via_imap(payload_b64: bytes) -> None:
     msg.attach(part)
     with _send_lock:
         conn = _get_send_conn()
-        conn.append(QUEUE_FOLDER, None, None, msg.as_bytes())  # type: ignore[arg-type]  # RFC 3501: NIL valid
+        conn.append(QUEUE_FOLDER, msg.as_bytes())
 
 
 def _extract_attachment(raw: bytes) -> bytes | None:
@@ -130,34 +130,38 @@ def _poll_response(req_id: str) -> dict[str, Any] | None:
     m = None
     try:
         m = _imap_connect()
-        m.select("INBOX")
-        seen_uids = set()
-        for cycle in range(POLL_CYCLES):
+        m.select_folder("INBOX")
+        seen_uids: set[int] = set()
+        deadline = t0 + POLL_TIMEOUT
+        cycle = 0
+        while time.time() < deadline:
             if cycle > 0:
-                interval = 0.3 if cycle < 10 else (0.5 if cycle < 30 else 1.0)
-                time.sleep(interval)
+                try:
+                    m.idle()
+                    m.idle_check(timeout=3)
+                    m.idle_done()
+                except Exception:
+                    try:
+                        m.noop()
+                    except Exception:
+                        m = _imap_connect()
+                        m.select_folder("INBOX")
+            cycle += 1
             try:
-                m.noop()
+                uids = m.search(["NOT", "DELETED"])
             except Exception:
                 m = _imap_connect()
-                m.select("INBOX")
-            _, msgs = m.search(None, "UNSEEN")
-            if not msgs[0]:
-                if cycle > 5:
-                    _, msgs = m.search(None, "ALL")
-                    if not msgs[0]:
-                        continue
-                else:
-                    continue
-            uids = msgs[0].split()
+                m.select_folder("INBOX")
+                continue
             new_uids = [u for u in uids if u not in seen_uids]
             for uid in reversed(new_uids):
                 seen_uids.add(uid)
-                _, data = m.fetch(uid, "(RFC822)")
-                if not data or not data[0] or data[0] is None:
-                    continue
-                raw = data[0][1]
-                if not isinstance(raw, bytes):
+                try:
+                    data = m.fetch([uid], ["RFC822"])
+                    if uid not in data:
+                        continue
+                    raw = data[uid][b"RFC822"]
+                except Exception:
                     continue
                 att = _extract_attachment(raw)
                 if att is None:
@@ -169,7 +173,7 @@ def _poll_response(req_id: str) -> dict[str, Any] | None:
                         elapsed = time.time() - t0
                         log.info("[%s] response (%.1fs, cycle %d)", req_id, elapsed, cycle)
                         try:
-                            m.store(uid, "+FLAGS", "\\Deleted")
+                            m.set_flags([uid], [b"\\Deleted"])
                             m.expunge()
                         except Exception:
                             pass
@@ -213,8 +217,7 @@ class ClaudeProxyHandler(BaseHTTPRequestHandler):
         }
 
         t_start = time.time()
-        with open("/tmp/cp-trace.log", "a") as _f:
-            _f.write(f"{time.strftime('%H:%M:%S')} REQ {method} {self.path}\n")
+        log.debug("[%s] REQ %s %s", req_id, method, self.path)
         log.info("[%s] %s %s", req_id, method, self.path)
 
         try:
@@ -253,8 +256,7 @@ class ClaudeProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(body_bytes)
 
         elapsed = time.time() - t_start
-        with open("/tmp/cp-trace.log", "a") as _f:
-            _f.write(f"{time.strftime('%H:%M:%S')} RSP {status_code} {len(body_bytes)}b {elapsed:.1f}s {self.path}\n")
+        log.debug("[%s] RSP %d %db %.1fs %s", req_id, status_code, len(body_bytes), elapsed, self.path)
         log.info("[%s] ← %d (%d bytes, %.1fs)", req_id, status_code, len(body_bytes), elapsed)
 
     def do_GET(self) -> None:

@@ -158,6 +158,9 @@ def extract_attachment(raw: bytes) -> bytes | None:
     return None
 
 
+_IDLE_SCHEDULE = [2, 2, 3, 3, 5, 5, 10, 10]
+
+
 def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
     import ioe_web
     from ioe_telemetry import RequestTiming, Timer, collector
@@ -183,7 +186,8 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
                 if cycle > 0:
                     try:
                         m.idle()
-                        m.idle_check(timeout=10)
+                        idle_timeout = _IDLE_SCHEDULE[min(cycle, len(_IDLE_SCHEDULE) - 1)]
+                        m.idle_check(timeout=idle_timeout)
                         m.idle_done()
                     except Exception:
                         time.sleep(1 + random.random() * 0.6)
@@ -229,7 +233,10 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
                             continue
                         rid = response.get("id", "")
                         if rid != req_id:
-                            stale_response_uids.append(uid)
+                            resp_type = response.get("type", "")
+                            resp_user = response.get("user_id", "")
+                            if resp_type != "claude_proxy_response" and (not resp_user or resp_user == user_id):
+                                stale_response_uids.append(uid)
                         if rid == req_id:
                             elapsed = time.time() - t0
                             timing.record("wait", elapsed * 1000 - t_conn.elapsed_ms)

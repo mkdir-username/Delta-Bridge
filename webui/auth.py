@@ -1,4 +1,4 @@
-"""Authentication: phone whitelist, httponly sessions, rate limiting, email OTP."""
+"""Authentication: phone whitelist, httponly sessions, rate limiting, TOTP."""
 
 from __future__ import annotations
 import os
@@ -7,14 +7,13 @@ import re
 import time
 import secrets
 import hmac
-import smtplib
-import threading
 import logging
 import sys
-from email.mime.text import MIMEText as _MIMEText
+
+import pyotp
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from ioe_types import OTPEntry, Whitelist, SessionStore, RateStore  # noqa: E402
+from ioe_types import Whitelist, SessionStore, RateStore  # noqa: E402
 
 log = logging.getLogger("ioe.auth")
 
@@ -216,10 +215,6 @@ def _maybe_cleanup() -> None:
 OTP_TTL = 300
 OTP_RATE_LIMIT = 3
 OTP_RATE_WINDOW = 300
-SMTP_HOST = "smtp.yandex.ru"
-SMTP_PORT = 465
-_otp_lock = threading.Lock()
-_otp_store: dict[str, OTPEntry] = {}
 _otp_phone_rate: RateStore = {}
 
 
@@ -255,41 +250,77 @@ def mask_email(email: str | None) -> str | None:
     return f"{masked}@{domain}"
 
 
-def create_otp(phone: str, ip: str | None = None) -> str:
-    code = f"{secrets.randbelow(1000000):06d}"
-    with _otp_lock:
-        _otp_store[_normalize_phone(phone)] = {
-            "code": code,
-            "created": time.time(),
-            "ip": ip,
-        }
-    return code
+_pending_totp: dict[str, dict[str, float | str]] = {}
+PENDING_TOTP_TTL = 300
 
 
-def verify_otp(phone: str, code: str, ip: str | None = None) -> bool:
+def set_pending_totp(phone: str, secret: str) -> None:
     phone = _normalize_phone(phone)
-    with _otp_lock:
-        entry = _otp_store.get(phone)
-        if not entry:
-            return False
-        if time.time() - entry["created"] > OTP_TTL:
-            _otp_store.pop(phone, None)
-            return False
-        if entry.get("ip") and ip and entry["ip"] != ip:
-            _otp_store.pop(phone, None)
-            return False
-        if hmac.compare_digest(entry["code"], code):
-            _otp_store.pop(phone, None)
-            return True
+    _pending_totp[phone] = {"secret": secret, "ts": time.time()}
+
+
+def get_pending_totp(phone: str) -> str | None:
+    phone = _normalize_phone(phone)
+    entry = _pending_totp.get(phone)
+    if not entry:
+        return None
+    if time.time() - float(entry["ts"]) > PENDING_TOTP_TTL:
+        _pending_totp.pop(phone, None)
+        return None
+    return str(entry["secret"])
+
+
+def clear_pending_totp(phone: str) -> None:
+    _pending_totp.pop(_normalize_phone(phone), None)
+
+
+def generate_totp_secret() -> str:
+    return pyotp.random_base32()
+
+
+def get_user_totp_secret(phone: str) -> str | None:
+    phone = _normalize_phone(phone)
+    entry = _whitelist.get(phone)
+    if not entry or not isinstance(entry, dict):
+        return None
+    return entry.get("totp_secret")
+
+
+def verify_totp(phone: str, code: str) -> bool:
+    secret = get_user_totp_secret(phone)
+    if not secret:
         return False
+    return verify_totp_with_secret(secret, code)
 
 
-def send_otp_email(to_email: str, code: str, from_email: str, smtp_password: str) -> None:
-    msg = _MIMEText(f"Kod vhoda IoE: {code}", "plain", "utf-8")
-    msg["Subject"] = "IoE: kod vhoda"
-    msg["From"] = from_email
-    msg["To"] = to_email
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-        server.login(from_email, smtp_password)
-        server.send_message(msg)
-    log.info("OTP sent to %s", to_email)
+def verify_totp_with_secret(secret: str, code: str) -> bool:
+    totp = pyotp.TOTP(secret)
+    return totp.verify(code, valid_window=1)
+
+
+def get_totp_provisioning_uri(phone: str, secret: str) -> str:
+    return pyotp.TOTP(secret).provisioning_uri(name=phone, issuer_name="IoE")
+
+
+def set_user_totp_secret(phone: str, secret: str) -> None:
+    phone = _normalize_phone(phone)
+    entry = _whitelist.get(phone)
+    if entry is None:
+        return
+    if not isinstance(entry, dict):
+        _whitelist[phone] = {"totp_secret": secret}
+    else:
+        entry["totp_secret"] = secret
+    _save_whitelist()
+
+
+def _save_whitelist() -> None:
+    if not _whitelist_path:
+        return
+    try:
+        tmp = _whitelist_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(_whitelist, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, _whitelist_path)
+    except OSError as e:
+        log.warning("Failed to save whitelist: %s", e)

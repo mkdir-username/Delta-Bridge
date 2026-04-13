@@ -558,6 +558,9 @@ footer .channel { color: var(--text-dim); }
 .claude-compose-row button:hover { opacity:0.9; }
 .claude-compose-row button:disabled { opacity:0.4; cursor:not-allowed; }
 
+.hidden { display: none; }
+.cancel-reply-btn { background:none; border:none; color:var(--text-muted); cursor:pointer; }
+
 """
 
 

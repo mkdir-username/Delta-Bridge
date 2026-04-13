@@ -191,7 +191,7 @@ def handle_browser_request(request: dict[str, Any]) -> dict[str, Any]:
         return {"status": 500, "error": str(e)}
     finally:
         if not session_id:
-            pool.release(session_id or "page_0")
+            pool.release("page_0")
 
 
 def _take_screenshot(page: Any) -> str:

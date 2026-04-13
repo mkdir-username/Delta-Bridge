@@ -127,6 +127,7 @@ class OTPEntry(TypedDict):
 class WhitelistEntry(TypedDict):
     password: str
     email: NotRequired[str]
+    totp_secret: NotRequired[str]
 
 
 Whitelist = dict[str, WhitelistEntry]

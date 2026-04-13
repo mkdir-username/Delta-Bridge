@@ -8,10 +8,30 @@ import os
 import json
 from typing import Any
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "webui"))
+import auth
+
 USERS_FILE: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
 
 
 def main() -> None:
+    if "--setup-totp" in sys.argv:
+        idx = sys.argv.index("--setup-totp")
+        if idx + 1 >= len(sys.argv):
+            print("Usage: python add_user.py --setup-totp +7XXXXXXXXXX")
+            sys.exit(1)
+        phone = sys.argv[idx + 1]
+        import pyotp
+
+        auth.load_whitelist()
+        secret = pyotp.random_base32()
+        uri = pyotp.TOTP(secret).provisioning_uri(name=phone, issuer_name="IoE")
+        auth.set_user_totp_secret(phone, secret)
+        print(f"TOTP Secret: {secret}")
+        print(f"URI: {uri}")
+        print("Saved to users.json")
+        sys.exit(0)
+
     if len(sys.argv) < 2:
         print("Usage: python add_user.py <phone>")
         sys.exit(1)

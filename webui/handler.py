@@ -667,8 +667,6 @@ class Handler(BaseHTTPRequestHandler):
         self.respond_json({"id": req_id, "status": "pending"})
 
     def _handle_login_email_post(self) -> None:
-        import ioe_web
-
         body_bytes = self._read_body()
         if body_bytes is None:
             return
@@ -687,26 +685,15 @@ class Handler(BaseHTTPRequestHandler):
                 _ = hmac.new(b"honeypot-pad", phone.encode(), hashlib.sha256).digest()
                 self.respond_json({"status": "code_sent"})
                 return
-
             ip = self.client_address[0]
             if not auth.check_rate_limit(ip):
                 self.respond_json({"status": "error", "error": "Подождите минуту"})
                 return
-
-            email_addr = auth.get_user_email(phone)
-            if not email_addr:
-                self.respond_json({"status": "error", "error": "Email не настроен"})
+            secret = auth.get_user_totp_secret(phone)
+            if not secret:
+                self.respond_json({"status": "setup_required"})
                 return
-
-            code = auth.create_otp(phone)
-            try:
-                auth.send_otp_email(email_addr, code, ioe_web.EMAIL, ioe_web.IMAP_PASSWORD)
-            except Exception as e:
-                log.error("SMTP failed: %s", e)
-                self.respond_json({"status": "error", "error": "Ошибка отправки email"})
-                return
-
-            self.respond_json({"status": "code_sent", "email": auth.mask_email(email_addr)})
+            self.respond_json({"status": "code_sent"})
             return
 
         if action == "verify_code":
@@ -714,8 +701,12 @@ class Handler(BaseHTTPRequestHandler):
             if not code or not phone:
                 self.respond_json({"status": "error", "error": "Введите код"})
                 return
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self.respond_json({"status": "error", "error": "Подождите минуту"})
+                return
 
-            if auth.verify_otp(phone, code):
+            if auth.verify_totp(phone, code):
                 sid = auth.create_session(phone)
                 result = {"status": "authorized"}
                 body_bytes = json.dumps(result, ensure_ascii=False).encode("utf-8")
@@ -730,6 +721,81 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body_bytes)
                 return
 
+            self.respond_json({"status": "error", "error": "Неверный код"})
+            return
+
+        if action == "setup_totp":
+            if not auth.is_whitelisted(phone):
+                self.respond_json({"status": "error", "error": "Не авторизован"})
+                return
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self.respond_json({"status": "error", "error": "Подождите минуту"})
+                return
+            secret = auth.get_user_totp_secret(phone)
+            if secret:
+                self.respond_json({"status": "error", "error": "TOTP уже настроен"})
+                return
+            new_secret = auth.generate_totp_secret()
+            auth.set_pending_totp(phone, new_secret)
+            uri = auth.get_totp_provisioning_uri(phone, new_secret)
+            qr_data_uri = ""
+            try:
+                import io as _io
+                import base64 as _b64
+                import qrcode
+
+                img = qrcode.make(uri)
+                buf = _io.BytesIO()
+                img.save(buf, format="PNG")
+                qr_data_uri = "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode()
+            except ImportError:
+                pass
+            self.respond_json(
+                {
+                    "status": "setup_required",
+                    "secret": new_secret,
+                    "provisioning_uri": uri,
+                    "qr_data_uri": qr_data_uri,
+                }
+            )
+            return
+
+        if action == "confirm_totp":
+            if not auth.is_whitelisted(phone):
+                self.respond_json({"status": "error", "error": "Не авторизован"})
+                return
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self.respond_json({"status": "error", "error": "Подождите минуту"})
+                return
+            if auth.get_user_totp_secret(phone):
+                self.respond_json({"status": "error", "error": "TOTP уже настроен"})
+                return
+            pending_secret = auth.get_pending_totp(phone)
+            if not pending_secret:
+                self.respond_json({"status": "error", "error": "Сначала запросите setup"})
+                return
+            code = body.get("code", "")
+            if not code:
+                self.respond_json({"status": "error", "error": "Введите код"})
+                return
+            if auth.verify_totp_with_secret(pending_secret, code):
+                auth.set_user_totp_secret(phone, pending_secret)
+                auth.clear_pending_totp(phone)
+                sid = auth.create_session(phone)
+                result = {"status": "authorized"}
+                body_bytes = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header(
+                    "Set-Cookie",
+                    f"sid={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={auth.SESSION_TTL}",
+                )
+                self._add_security_headers()
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
             self.respond_json({"status": "error", "error": "Неверный код"})
             return
 

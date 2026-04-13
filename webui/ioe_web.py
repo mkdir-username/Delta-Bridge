@@ -248,14 +248,24 @@ def rebuild_html():
     for mod in _ui_modules:
         importlib.reload(mod)
     HTML_PAGE = _build_html()
-    SCRIPT_HASHES = _inline_hashes(HTML_PAGE, "script")
-    STYLE_HASHES = _inline_hashes(HTML_PAGE, "style")
+    main_s = _inline_hashes(HTML_PAGE, "script")
+    main_st = _inline_hashes(HTML_PAGE, "style")
+    login_html = html_templates.login_page()
+    login_s = _inline_hashes(login_html, "script")
+    login_st = _inline_hashes(login_html, "style")
+    SCRIPT_HASHES = list(dict.fromkeys(main_s + login_s))
+    STYLE_HASHES = list(dict.fromkeys(main_st + login_st))
     return HTML_PAGE
 
 
 HTML_PAGE = _build_html()
-SCRIPT_HASHES = _inline_hashes(HTML_PAGE, "script")
-STYLE_HASHES = _inline_hashes(HTML_PAGE, "style")
+_main_script_h = _inline_hashes(HTML_PAGE, "script")
+_main_style_h = _inline_hashes(HTML_PAGE, "style")
+_login_html = html_templates.login_page()
+_login_script_h = _inline_hashes(_login_html, "script")
+_login_style_h = _inline_hashes(_login_html, "style")
+SCRIPT_HASHES = list(dict.fromkeys(_main_script_h + _login_script_h))
+STYLE_HASHES = list(dict.fromkeys(_main_style_h + _login_style_h))
 
 
 def main() -> None:

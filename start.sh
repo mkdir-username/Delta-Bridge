@@ -45,13 +45,13 @@ if [ -f "$DIR/.venv/bin/activate" ]; then
 fi
 
 # Check deps
-python3 -c "from Crypto.Cipher import AES; from imapclient import IMAPClient" 2>/dev/null || {
+python3 -c "from Crypto.Cipher import AES; from imapclient import IMAPClient; import pyotp" 2>/dev/null || {
   if [ -z "$VIRTUAL_ENV" ]; then
     echo "Dependencies missing. Activate venv first: source .venv/bin/activate"
     exit 1
   fi
   echo "Installing dependencies..."
-  pip3 install pycryptodome imapclient
+  pip3 install pycryptodome imapclient pyotp qrcode bcrypt
 }
 
 # Find ioe_web.py
