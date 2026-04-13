@@ -701,6 +701,10 @@ class Handler(BaseHTTPRequestHandler):
             if not code or not phone:
                 self.respond_json({"status": "error", "error": "Введите код"})
                 return
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self.respond_json({"status": "error", "error": "Подождите минуту"})
+                return
 
             if auth.verify_totp(phone, code):
                 sid = auth.create_session(phone)
@@ -724,11 +728,16 @@ class Handler(BaseHTTPRequestHandler):
             if not auth.is_whitelisted(phone):
                 self.respond_json({"status": "error", "error": "Не авторизован"})
                 return
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self.respond_json({"status": "error", "error": "Подождите минуту"})
+                return
             secret = auth.get_user_totp_secret(phone)
             if secret:
                 self.respond_json({"status": "error", "error": "TOTP уже настроен"})
                 return
             new_secret = auth.generate_totp_secret()
+            auth.set_pending_totp(phone, new_secret)
             uri = auth.get_totp_provisioning_uri(phone, new_secret)
             qr_data_uri = ""
             try:
@@ -753,13 +762,27 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if action == "confirm_totp":
+            if not auth.is_whitelisted(phone):
+                self.respond_json({"status": "error", "error": "Не авторизован"})
+                return
+            ip = self.client_address[0]
+            if not auth.check_rate_limit(ip):
+                self.respond_json({"status": "error", "error": "Подождите минуту"})
+                return
+            if auth.get_user_totp_secret(phone):
+                self.respond_json({"status": "error", "error": "TOTP уже настроен"})
+                return
+            pending_secret = auth.get_pending_totp(phone)
+            if not pending_secret:
+                self.respond_json({"status": "error", "error": "Сначала запросите setup"})
+                return
             code = body.get("code", "")
-            new_secret = body.get("secret", "")
-            if not code or not new_secret:
+            if not code:
                 self.respond_json({"status": "error", "error": "Введите код"})
                 return
-            if auth.verify_totp_with_secret(new_secret, code):
-                auth.set_user_totp_secret(phone, new_secret)
+            if auth.verify_totp_with_secret(pending_secret, code):
+                auth.set_user_totp_secret(phone, pending_secret)
+                auth.clear_pending_totp(phone)
                 sid = auth.create_session(phone)
                 result = {"status": "authorized"}
                 body_bytes = json.dumps(result, ensure_ascii=False).encode("utf-8")
