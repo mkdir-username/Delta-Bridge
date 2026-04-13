@@ -10,12 +10,12 @@ from css import login_css
 class TestLoginPage:
     def test_contains_step_divs(self):
         html = login_page()
-        for step in ["step-phone", "step-code"]:
+        for step in ["step-phone", "step-setup"]:
             assert step in html
 
     def test_contains_auth_js_functions(self):
         html = login_page()
-        for fn in ["authStart", "authCode"]:
+        for fn in ["authCode", "verifySetup"]:
             assert fn in html
 
     def test_contains_login_email_endpoint(self):

@@ -203,20 +203,16 @@ class TestLoginEmailPost:
         assert body["status"] == "code_sent"
 
     def test_email_send_code_ok(self):
-        """Телефон в whitelist, send_code → code_sent с маскированным email."""
+        """Телефон в whitelist, TOTP secret есть → code_sent."""
         port = get_free_port()
         with (
             patch.object(auth, "is_whitelisted", return_value=True),
             patch.object(auth, "check_rate_limit", return_value=True),
-            patch.object(auth, "get_user_email", return_value="user@example.com"),
-            patch.object(auth, "create_otp", return_value="123456"),
-            patch.object(auth, "send_otp_email"),
-            patch.object(auth, "mask_email", return_value="u***@example.com"),
+            patch.object(auth, "get_user_totp_secret", return_value="TESTSECRET"),
         ):
             status, body = post_json(port, "/login/email", {"action": "send_code", "phone": "+79001234567"})
         assert status == 200
         assert body["status"] == "code_sent"
-        assert "email" in body
 
     def test_email_send_code_rate_limited(self):
         """Превышен rate limit → error."""
@@ -230,16 +226,16 @@ class TestLoginEmailPost:
         assert body["status"] == "error"
 
     def test_email_send_code_no_email_configured(self):
-        """Email не настроен для пользователя → error."""
+        """TOTP secret не настроен → setup_required."""
         port = get_free_port()
         with (
             patch.object(auth, "is_whitelisted", return_value=True),
             patch.object(auth, "check_rate_limit", return_value=True),
-            patch.object(auth, "get_user_email", return_value=None),
+            patch.object(auth, "get_user_totp_secret", return_value=None),
         ):
             status, body = post_json(port, "/login/email", {"action": "send_code", "phone": "+79001234567"})
         assert status == 200
-        assert body["status"] == "error"
+        assert body["status"] == "setup_required"
 
     def test_email_verify_code_ok(self):
         """Верный код → authorized + Set-Cookie."""
@@ -248,7 +244,7 @@ class TestLoginEmailPost:
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
         with (
-            patch.object(auth, "verify_otp", return_value=True),
+            patch.object(auth, "verify_totp", return_value=True),
             patch.object(auth, "create_session", return_value="abc123"),
         ):
             data = json.dumps({"action": "verify_code", "phone": "+79001234567", "code": "123456"}).encode()
@@ -269,7 +265,7 @@ class TestLoginEmailPost:
     def test_email_verify_code_wrong(self):
         """Неверный код → error."""
         port = get_free_port()
-        with patch.object(auth, "verify_otp", return_value=False):
+        with patch.object(auth, "verify_totp", return_value=False):
             status, body = post_json(
                 port, "/login/email", {"action": "verify_code", "phone": "+79001234567", "code": "000000"}
             )
