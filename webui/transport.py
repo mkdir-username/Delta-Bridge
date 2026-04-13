@@ -233,7 +233,10 @@ def poll_response(user_id: str, req_id: str, timeout: int = 60) -> None:
                             continue
                         rid = response.get("id", "")
                         if rid != req_id:
-                            stale_response_uids.append(uid)
+                            resp_type = response.get("type", "")
+                            resp_user = response.get("user_id", "")
+                            if resp_type != "claude_proxy_response" and (not resp_user or resp_user == user_id):
+                                stale_response_uids.append(uid)
                         if rid == req_id:
                             elapsed = time.time() - t0
                             timing.record("wait", elapsed * 1000 - t_conn.elapsed_ms)
