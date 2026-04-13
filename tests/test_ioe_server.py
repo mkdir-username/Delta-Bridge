@@ -388,25 +388,31 @@ class TestSessionLifecycle:
         try:
             result = ioe_server.dispatch_request({"type": "session_start", "session_id": "test-s1", "user_id": "u1"})
             assert result.get("status") == 200
-            assert "test-s1" in ioe_server._sessions
+            sid = result["session_id"]
+            assert sid != "test-s1"
+            assert len(sid) == 32
+            assert sid in ioe_server._sessions
         finally:
             if original_session_cls is None:
                 del ioe_server.requests.Session
             else:
                 ioe_server.requests.Session = original_session_cls
-            ioe_server._sessions.pop("test-s1", None)
+            ioe_server._sessions.pop(result.get("session_id", ""), None)
 
     def test_session_end_удаляет_существующую_сессию(self):
         import ioe_server
 
         ioe_server.requests.Session = _FakeSession
         try:
-            ioe_server.dispatch_request({"type": "session_start", "session_id": "test-s2", "user_id": "u1"})
-            result = ioe_server.dispatch_request({"type": "session_end", "session_id": "test-s2", "user_id": "u1"})
+            start_result = ioe_server.dispatch_request(
+                {"type": "session_start", "session_id": "test-s2", "user_id": "u1"}
+            )
+            sid = start_result["session_id"]
+            result = ioe_server.dispatch_request({"type": "session_end", "session_id": sid, "user_id": "u1"})
             assert result.get("status") == 200
-            assert "test-s2" not in ioe_server._sessions
+            assert sid not in ioe_server._sessions
         finally:
-            ioe_server._sessions.pop("test-s2", None)
+            ioe_server._sessions.pop(start_result.get("session_id", ""), None)
 
     def test_session_end_несуществующей_сессии_возвращает_404(self):
         import ioe_server

@@ -848,7 +848,7 @@ def dispatch_request(request: dict[str, Any]) -> dict[str, Any] | None:
         result["user_id"] = user_id
         return result
     if req_type == "session_start":
-        sid = request.get("session_id", uuid.uuid4().hex)
+        sid = uuid.uuid4().hex
         _sessions[sid] = {"session": requests.Session(), "created": time.time()}
         return {"status": 200, "session_id": sid, "user_id": user_id}
     if req_type == "session_end":

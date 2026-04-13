@@ -321,8 +321,10 @@ class TestSessions(unittest.TestCase):
 
     def test_session_start_creates_session(self):
         result = srv.dispatch_request({"type": "session_start", "session_id": "test-s1"})
-        self.assertIn("test-s1", srv._sessions)
-        self.assertEqual(result["session_id"], "test-s1")
+        sid = result["session_id"]
+        self.assertNotEqual(sid, "test-s1")
+        self.assertEqual(len(sid), 32)
+        self.assertIn(sid, srv._sessions)
 
     def test_session_end_removes_session(self):
         mock_session = MagicMock()
