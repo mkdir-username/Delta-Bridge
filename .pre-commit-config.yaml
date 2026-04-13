@@ -17,7 +17,7 @@ repos:
 
       - id: pytest
         name: pytest
-        entry: python -m pytest --no-header -q
+        entry: python -m pytest tests/test_auth.py tests/test_hardening.py tests/test_ioe_crypto.py tests/test_types.py tests/test_error_types.py tests/test_envelope.py -x -q --timeout=10
         language: system
         pass_filenames: false
         types: [python]

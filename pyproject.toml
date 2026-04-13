@@ -36,4 +36,4 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--no-header -q --timeout=30"
+addopts = "--no-header -q --timeout=10 --timeout-method=signal -x"

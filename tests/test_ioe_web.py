@@ -1242,25 +1242,30 @@ class TestLoginFlow:
         import ioe_web
         import auth
 
-        port = get_free_port()
-        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        orig = auth.STATUS_RATE_LIMIT
+        auth.STATUS_RATE_LIMIT = 3
+        try:
+            port = get_free_port()
+            server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
 
-        for i in range(auth.STATUS_RATE_LIMIT):
+            for i in range(3):
+                t = threading.Thread(target=server.handle_request, daemon=True)
+                t.start()
+                resp = urlopen(f"http://127.0.0.1:{port}/login/status?id=test{i}", timeout=5)
+                assert resp.status == 200
+
+            from urllib.error import HTTPError as UrlHTTPError
+
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
-            resp = urlopen(f"http://127.0.0.1:{port}/login/status?id=test{i}", timeout=5)
-            assert resp.status == 200
-
-        from urllib.error import HTTPError as UrlHTTPError
-
-        t = threading.Thread(target=server.handle_request, daemon=True)
-        t.start()
-        try:
-            urlopen(f"http://127.0.0.1:{port}/login/status?id=over", timeout=5)
-            raise AssertionError("expected 429")
-        except UrlHTTPError as e:
-            assert e.code == 429
-        server.server_close()
+            try:
+                urlopen(f"http://127.0.0.1:{port}/login/status?id=over", timeout=5)
+                raise AssertionError("expected 429")
+            except UrlHTTPError as e:
+                assert e.code == 429
+            server.server_close()
+        finally:
+            auth.STATUS_RATE_LIMIT = orig
 
     def test_login_post_rate_limited(self):
         import ioe_web
