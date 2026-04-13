@@ -217,11 +217,11 @@ class Handler(BaseHTTPRequestHandler):
             with ioe_web.lock:
                 if (login_user_id, req_id) in ioe_web.pending:
                     resp = ioe_web.pending.pop((login_user_id, req_id))
+                    _ALLOWED_STATUS_KEYS = ("auth_status", "error", "hint", "set_session")
                     result: dict[str, Any] = {"status": "ready"}
-                    for key in resp:
-                        if key in ("id", "status"):
-                            continue
-                        result[key] = resp[key]
+                    for key in _ALLOWED_STATUS_KEYS:
+                        if key in resp:
+                            result[key] = resp[key]
                     if result.get("auth_status") == "authorized":
                         sid = auth.create_session(login_user_id)
                         result["set_session"] = True

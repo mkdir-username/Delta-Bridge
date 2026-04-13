@@ -1290,6 +1290,39 @@ class TestLoginFlow:
         server.server_close()
         auth.get_authenticated_user = old_auth
 
+    def test_login_status_filters_unexpected_keys(self):
+        import ioe_web
+        import handler as h
+        import time as _time
+
+        req_id = "filtertest1"
+        login_user_id = "login"
+        h._login_request_owners[req_id] = (login_user_id, _time.time())
+        with ioe_web.lock:
+            ioe_web.pending[(login_user_id, req_id)] = {
+                "id": req_id,
+                "status": 200,
+                "auth_status": "code_sent",
+                "hint": "check phone",
+                "internal_debug": "should_not_leak",
+                "stack_trace": "also_secret",
+                "_created": _time.time(),
+            }
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        with patch.object(auth, "check_rate_limit", return_value=True):
+            resp = urlopen(f"http://127.0.0.1:{port}/login/status?id={req_id}", timeout=5)
+        data = json.loads(resp.read().decode())
+        assert data["status"] == "ready"
+        assert data["auth_status"] == "code_sent"
+        assert data.get("hint") == "check phone"
+        assert "internal_debug" not in data
+        assert "stack_trace" not in data
+        assert "_created" not in data
+        server.server_close()
+
 
 class TestPostTgEndpoint:
     def test_post_tg_returns_pending(self):
