@@ -1245,7 +1245,7 @@ class TestLoginFlow:
         port = get_free_port()
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
 
-        for i in range(auth.RATE_LIMIT):
+        for i in range(auth.STATUS_RATE_LIMIT):
             t = threading.Thread(target=server.handle_request, daemon=True)
             t.start()
             resp = urlopen(f"http://127.0.0.1:{port}/login/status?id=test{i}", timeout=5)
@@ -1257,7 +1257,7 @@ class TestLoginFlow:
         t.start()
         try:
             urlopen(f"http://127.0.0.1:{port}/login/status?id=over", timeout=5)
-            raise AssertionError("ожидался 429")
+            raise AssertionError("expected 429")
         except UrlHTTPError as e:
             assert e.code == 429
         server.server_close()
@@ -1312,7 +1312,7 @@ class TestLoginFlow:
         server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
         t = threading.Thread(target=server.handle_request, daemon=True)
         t.start()
-        with patch.object(auth, "check_rate_limit", return_value=True):
+        with patch.object(auth, "check_status_rate_limit", return_value=True):
             resp = urlopen(f"http://127.0.0.1:{port}/login/status?id={req_id}", timeout=5)
         data = json.loads(resp.read().decode())
         assert data["status"] == "ready"
@@ -1321,6 +1321,44 @@ class TestLoginFlow:
         assert "internal_debug" not in data
         assert "stack_trace" not in data
         assert "_created" not in data
+        server.server_close()
+
+    def test_login_status_authorized_sets_cookie(self):
+        import ioe_web
+        import handler as h
+        import time as _time
+
+        req_id = "authcookie1"
+        login_user_id = "login"
+        h._login_request_owners[req_id] = (login_user_id, _time.time())
+        with ioe_web.lock:
+            ioe_web.pending[(login_user_id, req_id)] = {
+                "id": req_id,
+                "status": 200,
+                "auth_status": "authorized",
+                "set_session": True,
+                "internal_token": "should_not_leak",
+                "_created": _time.time(),
+            }
+        port = get_free_port()
+        server = HTTPServer(("127.0.0.1", port), ioe_web.Handler)
+        t = threading.Thread(target=server.handle_request, daemon=True)
+        t.start()
+        with (
+            patch.object(auth, "check_status_rate_limit", return_value=True),
+            patch.object(auth, "create_session", return_value="test-sid-abc"),
+        ):
+            resp = urlopen(f"http://127.0.0.1:{port}/login/status?id={req_id}", timeout=5)
+        data = json.loads(resp.read().decode())
+        assert data["status"] == "ready"
+        assert data["auth_status"] == "authorized"
+        assert data["set_session"] is True
+        assert "internal_token" not in data
+        assert "_created" not in data
+        cookie = resp.headers.get("Set-Cookie", "")
+        assert "sid=test-sid-abc" in cookie
+        assert "HttpOnly" in cookie
+        assert "SameSite=Strict" in cookie
         server.server_close()
 
 
