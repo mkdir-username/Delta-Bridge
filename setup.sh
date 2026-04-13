@@ -9,10 +9,10 @@ echo "Installing dependencies..."
 if command -v pkg >/dev/null 2>&1; then
   # Termux
   pkg install -y python 2>/dev/null || true
-  pip install pycryptodome imapclient beautifulsoup4 2>/dev/null || true
+  pip install pycryptodome imapclient beautifulsoup4 pyotp qrcode bcrypt 2>/dev/null || true
 else
   # macOS / Linux
-  pip3 install pycryptodome 2>/dev/null || pip3 install --break-system-packages pycryptodome 2>/dev/null || true
+  pip3 install pycryptodome imapclient pyotp qrcode bcrypt 2>/dev/null || pip3 install --break-system-packages pycryptodome imapclient pyotp qrcode bcrypt 2>/dev/null || true
 fi
 
 # Create .env if missing
