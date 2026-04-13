@@ -1,6 +1,6 @@
 ---
 name: owasp-security
-description: "Use when writing or reviewing auth, session, crypto, password, token, TOTP, or login code. Trigger on: 'проверь безопасность', 'security review', 'is this secure', writing/modifying files with auth/session/crypto/secret keywords. Also trigger when adding new HTTP endpoints, especially unauthenticated ones. Do NOT use for infrastructure/network security (DPI, VPN, firewall) — only application-level code security. Covers OWASP Top 10:2025, ASVS 5.0, Agentic AI Security 2026, 20+ language quirks."
+description: "Use when writing or reviewing auth, session, crypto, password, token, TOTP, or login code. Trigger on: 'sec', 'AppSec', 'owasp', 'pentest', 'пентест', 'проверь безопасность', 'security review', 'is this secure', writing/modifying files with auth/session/crypto/secret keywords. Also trigger when adding new HTTP endpoints, especially unauthenticated ones. Do NOT use for infrastructure/network security (DPI, VPN, firewall) — only application-level code security. Covers OWASP Top 10:2025, ASVS 5.0, Agentic AI Security 2026, 20+ language quirks."
 ---
 
 # OWASP Security Best Practices Skill
