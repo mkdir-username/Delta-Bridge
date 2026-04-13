@@ -553,22 +553,33 @@ def inline_images(html: str, base_url: str, max_images: int = 10, max_kb: int = 
 
 
 def do_search(query: str) -> list[dict[str, str]]:
-    try:
+    last_exc: Exception | None = None
+    for attempt in range(3):
         try:
-            from ddgs import DDGS
-        except ImportError:
-            from duckduckgo_search import DDGS
-        results = DDGS().text(query, max_results=10)
-        return [
-            {
-                "title": r.get("title", ""),
-                "href": r.get("href", ""),
-                "snippet": r.get("body", ""),
-            }
-            for r in results
-        ]
-    except Exception as e:
-        return [{"title": "Search error", "href": "", "snippet": str(e)}]
+            try:
+                from ddgs import DDGS
+            except ImportError:
+                from duckduckgo_search import DDGS
+            results = DDGS().text(query, max_results=10)
+            return [
+                {
+                    "title": r.get("title", ""),
+                    "href": r.get("href", ""),
+                    "snippet": r.get("body", ""),
+                }
+                for r in results
+            ]
+        except Exception as e:
+            last_exc = e
+            if attempt < 2:
+                time.sleep(1.5**attempt)
+            log.warning("DDGS attempt %d failed: %s", attempt + 1, e)
+    if BROWSER_AVAILABLE:
+        try:
+            return do_browser_search(query)
+        except Exception as e:
+            return [{"title": "Search error", "href": "", "snippet": str(e)}]
+    return [{"title": "Search error", "href": "", "snippet": str(last_exc)}]
 
 
 def do_browser_search(query: str) -> list[dict[str, str]]:
